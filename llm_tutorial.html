@@ -190,8 +190,8 @@ hr{border:none;border-top:.5px solid var(--rule);margin:2rem 0}
 ══════════════════════════════════════════════════════════════ -->
 <div class="cover no-break">
   <div class="cover-tag">LLM Build Week · Personal Reference</div>
-  <div class="cover-title">nanochat<br>Learning Journal</div>
-  <div class="cover-sub">Building a language model from scratch — concepts, code, and intuition</div>
+  <div class="cover-title">Teach You<br>an LLM</div>
+  <div class="cover-sub">From numbers and vectors to a working transformer — concepts, code, and intuition for building a language model from scratch</div>
   <div class="cover-badges">
     <span class="badge badge-pt">[PT] PyTorch built-in — comes from the library, just use it</span>
     <span class="badge badge-nc">[NC] nanochat custom — Karpathy wrote it, understand every line</span>
@@ -204,7 +204,7 @@ hr{border:none;border-top:.5px solid var(--rule);margin:2rem 0}
     <div class="cn"><div class="cn-val">6</div><div class="cn-label">N · layers</div></div>
     <div class="cn"><div class="cn-val">6</div><div class="cn-label">n_head · heads</div></div>
     <div class="cn"><div class="cn-val">64</div><div class="cn-label">d_h · head dim</div></div>
-    <div class="cn"><div class="cn-val">19.3M</div><div class="cn-label">wte params</div></div>
+    <div class="cn"><div class="cn-val">2 + 7</div><div class="cn-label">parts · phases</div></div>
   </div>
 </div>
 
@@ -224,10 +224,20 @@ hr{border:none;border-top:.5px solid var(--rule);margin:2rem 0}
     <div>· Architecture Overview — the full pipeline</div>
     <div>· Key Terms — wte · lm_head · n_head</div>
     <div>· Output — logits, softmax, cross-entropy</div>
-    <div>· Phase 1 — Tokenisation (BPE · tiktoken · char)</div>
-    <div>· Phase 2 — Embeddings &amp; the block</div>
-    <div>· Phase 3.1 — Q/K/V Projections <em>(current)</em></div>
+    <div>· <strong>Part 0</strong> — Foundations: numbers, vectors, matrices</div>
+    <div>· <strong>Part 0.5</strong> — Sequence-modelling lineage (RNN → LSTM → attention)</div>
+    <div>· <strong>Phase 1</strong> — Tokenisation (BPE · tiktoken · char)</div>
+    <div>· <strong>Phase 2</strong> — Embeddings &amp; positional encoding</div>
+    <div>· <strong>Phase 3.1</strong> — Q/K/V projections</div>
+    <div>· <strong>Phase 3.2</strong> — Attention scores + causal mask</div>
+    <div>· <strong>Phase 3.3</strong> — Softmax + value aggregation</div>
+    <div>· <strong>Phase 3.4</strong> — Multi-head concat + output projection</div>
+    <div>· <strong>Phase 4</strong> — Residuals, LayerNorm, feed-forward</div>
+    <div>· <strong>Phase 5</strong> — Training loop &amp; cross-entropy</div>
+    <div>· <strong>Phase 6</strong> — Generation (greedy, top-k, top-p)</div>
+    <div>· <strong>Phase 7</strong> — Encoder-decoder &amp; cross-attention</div>
     <div>· ★ The Complete Dimension Trace</div>
+    <div>· Conceptual lineage: where this leads next</div>
     <div>· PyTorch Built-ins Cheat Sheet</div>
   </div>
 </nav>
@@ -630,6 +640,1386 @@ idx = torch.cat([idx, next_token], dim=1) <span class="ptag">PT</span>  <span cl
       Attention scores are (T, T) pairwise relevance ratings. The causal mask sets scores above the diagonal to −∞ before softmax — token at position t cannot attend to positions t+1, t+2, …. After softmax, −∞ becomes zero probability. Future tokens contribute nothing.
     </div>
   </div>
+</div>
+
+<div class="section-break"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     PART 0 — FOUNDATIONS
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header no-break">
+  <span class="phase-num">0</span>
+  <div class="phase-title">Part 0: Foundations</div>
+  <div class="phase-sub">Numbers, vectors, and matrices — the building blocks of everything</div>
+</div>
+
+<h2>0.1 Why We Need Numbers</h2>
+
+<p>
+  Neural networks only understand one language: numbers. Text is meaning, poetry, instruction—but a neural net sees zeros and ones, addition and multiplication. So our entire journey begins with a single, foundational problem:
+</p>
+
+<div class="callout c-key">
+  <strong>The Core Problem</strong>
+  How do we convert human language—words, sentences, paragraphs—into numbers that preserve meaning and let machines predict what comes next?
+</div>
+
+<p>
+  The answer involves three transformations, each building on the last:
+</p>
+
+<div class="shape-flow">
+<span class="sf-note">Text         </span><span class="sf-arrow">→ </span><span class="sf-shape">Token IDs</span><span class="sf-arrow">   → </span><span class="sf-shape">Embeddings</span><span class="sf-arrow">   → </span><span class="sf-shape">Tensors</span><span class="sf-note">→ Model processes</span>
+</div>
+
+<p>
+  Throughout this tutorial we'll work with a toy vocabulary to make the math concrete. Our examples use:
+</p>
+
+<ul>
+  <li><strong>Batch size B = 12</strong> (12 sequences processed together)</li>
+  <li><strong>Context length T = 1024</strong> (sequences up to 1024 tokens)</li>
+  <li><strong>Embedding dimension C = 384</strong> (384 features per token)</li>
+  <li><strong>Vocabulary size V = 50,257</strong> (GPT-2's vocabulary)</li>
+</ul>
+
+<p>
+  These are the same numbers used throughout. When you see a shape like <code>(B, T, C)</code>, substitute: <code>(12, 1024, 384)</code>.
+</p>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>
+      Neural networks are just giant calculators. They add, multiply, and apply nonlinear squashing functions. They have no native understanding of strings, words, or letters. Feeding "hello" into a neural network makes no more sense than feeding a love poem to a calculator. So before the network can do anything, we must translate every word to a number.
+    </p>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual</div></div>
+    <div class="visual">
+      <div class="visual-title">ENCODING PIPELINE</div>
+      <pre style="margin:0; font-size:0.85em;">
+"cat"     → Token ID: 2653   → Embedding:      → Tensor:
+              (integer)         [0.65, 0.48,      (B, T, C)
+                                 0.72, ...      (12, 1024, 384)
+                                 384 dims]
+      </pre>
+    </div>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code sketch</div></div>
+    <pre><span class="cc"># Pseudocode: the three-stage pipeline</span>
+text = <span class="cs">"cat"</span>
+token_id = tokenizer.encode(text)           <span class="cc"># → 2653</span>
+embedding = embedding_matrix[token_id]      <span class="cc"># → [0.65, 0.48, 0.72, ...]</span>
+tensor = embedding.reshape(1, 1, 384)       <span class="cc"># → shape (1, 1, 384)</span>
+    </pre>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insight</div></div>
+    <div class="callout c-key">
+      Every word becomes a single row in an embedding matrix. Row i contains the embedding for token i. The matrix shape is always <strong>vocabulary_size × embedding_dimension</strong>, e.g., (50,257 × 384). Looking up a word is just indexing: <code>embedding_matrix[token_id, :]</code>.
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<h2>0.2 Vectors and the Embedding Matrix</h2>
+
+<p>
+  Let's zoom in on the embedding matrix. This single object is so fundamental that understanding it deeply will pay dividends later.
+</p>
+
+<h3>Column Vectors: How Embeddings Are Stored</h3>
+
+<p>
+  An embedding is a <strong>column vector</strong> — a list of numbers stacked vertically. When we write the embedding for "cat" in 4 dimensions, we write:
+</p>
+
+<div style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px; font-family: monospace; text-align: center; line-height: 1.8;">
+  cat_embedding = <br>
+  [ 0.2 ]  ← dimension 0 <br>
+  [ 0.8 ]  ← dimension 1 <br>
+  [ 0.3 ]  ← dimension 2 <br>
+  [ 0.5 ]  ← dimension 3
+</div>
+
+<p>
+  Each number is a <strong>dimension</strong> or <strong>feature</strong>. We don't usually know what each dimension means — the network learns that during training. One dimension might capture "animacy" (cat is alive), another "softness," another "cuteness." Or none of those. The point is: we let the network figure out what's useful.
+</p>
+
+<p>
+  <strong>Why column vectors?</strong> Matrix multiplication is the dominant operation in neural networks. Shapes must align:
+</p>
+
+<div style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px; font-family: monospace; text-align: center;">
+  Weight matrix × Input vector = Output vector <br>
+  (3 × 4) × (4 × 1) = (3 × 1) ✓
+</div>
+
+<p>
+  Column vectors make this work naturally. More on matrix multiplication in section 0.3.
+</p>
+
+<h3>The Embedding Matrix: Storing All Word Vectors</h3>
+
+<p>
+  Instead of storing embeddings one at a time, we stack them all together into a single giant matrix. Each row holds one word's embedding:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px; overflow-x: auto;">
+<span class="cc"># Embedding Matrix: (V × C) = (50,257 × 384)</span>
+             Dim 0   Dim 1   Dim 2   ...  Dim 383
+Token 0:     0.15    0.42    0.88   ...   0.21    ← row 0 = "the"
+Token 1:     0.67    0.19    0.44   ...   0.53    ← row 1 = "a"
+Token 2653:  0.65    0.48    0.72   ...   0.91    ← row 2653 = "cat"
+...
+Token 50256: 0.08    0.71    0.15   ...   0.62    ← row 50256 = "<|endoftext|>"
+</pre>
+
+<p>
+  <strong>Lookup is trivial:</strong>
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+token_id = 2653          <span class="cc"># "cat"</span>
+embedding = emb_matrix[2653, :]
+<span class="cc"># → [0.65, 0.48, 0.72, ..., 0.91]</span>
+<span class="cc"># shape: (384,) — a single embedding vector</span>
+</pre>
+
+<p>
+  When we process a batch of sequences, we perform <strong>batch indexing</strong>: given a (B, T) tensor of token IDs, we retrieve a (B, T, C) tensor of embeddings. This is the very first step inside the transformer.
+</p>
+
+<div class="callout c-note">
+  <strong>Shape Notation Convention</strong>
+  Throughout this tutorial, we use (B, T, C) shorthand for batch × time × channel. Substituting our concrete numbers: (12, 1024, 384). When you see a shape formula, always pair it with numbers.
+</div>
+
+<hr>
+
+<h2>0.3 A 5-Minute Matrix Multiplication Primer</h2>
+
+<p>
+  Matrix multiplication is the heartbeat of neural networks. You'll see it hundreds of times. Let's understand it deeply via concrete examples.
+</p>
+
+<h3>The Rule: Inner Dimensions Must Match</h3>
+
+<p>
+  For two matrices to multiply:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px; font-family: monospace; text-align: center;">
+A (m × n) × B (n × p) = C (m × p)
+      ↑       ↑
+   These must match!
+</pre>
+
+<p>
+  The inner dimensions (<code>n</code>) must be identical. The result has dimensions from the outer edges: <code>m</code> and <code>p</code>.
+</p>
+
+<h3>How It Works: Row × Column Dot Products</h3>
+
+<p>
+  Each element of the result is the dot product of a row from A and a column from B:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+A (2 × 3):          B (3 × 2):
+[1  2  3]           [7   8]
+[4  5  6]           [9  10]
+                    [11 12]
+
+Result[0,0] = Row 0 of A · Col 0 of B
+            = [1, 2, 3] · [7, 9, 11]
+            = (1×7) + (2×9) + (3×11)
+            = 7 + 18 + 33 = 58
+
+Result[0,1] = Row 0 of A · Col 1 of B
+            = [1, 2, 3] · [8, 10, 12]
+            = (1×8) + (2×10) + (3×12)
+            = 8 + 20 + 36 = 64
+
+Result[1,0] = Row 1 of A · Col 0 of B
+            = [4, 5, 6] · [7, 9, 11]
+            = (4×7) + (5×9) + (6×11)
+            = 28 + 45 + 66 = 139
+
+Result[1,1] = Row 1 of A · Col 1 of B
+            = [4, 5, 6] · [8, 10, 12]
+            = (4×8) + (5×10) + (6×12)
+            = 32 + 50 + 72 = 154
+
+Final result:
+[58   64]
+[139  154]
+</pre>
+
+<h3>Matrix × Vector (Most Common in ML)</h3>
+
+<p>
+  This is the case you'll see most often. A weight matrix multiplies an input vector to produce an output vector:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+W (3 × 4):           x (4 × 1):
+[1  2  3  4]         [10]
+[5  6  7  8]      ×  [20]
+[9 10 11 12]         [30]
+                     [40]
+
+Output[0] = [1,2,3,4] · [10,20,30,40]
+          = 1×10 + 2×20 + 3×30 + 4×40
+          = 10 + 40 + 90 + 160 = 300
+
+Output[1] = [5,6,7,8] · [10,20,30,40]
+          = 5×10 + 6×20 + 7×30 + 8×40
+          = 50 + 120 + 210 + 320 = 700
+
+Output[2] = [9,10,11,12] · [10,20,30,40]
+          = 9×10 + 10×20 + 11×30 + 12×40
+          = 90 + 200 + 330 + 480 = 1100
+
+Result:
+[300]
+[700]
+[1100]
+
+Interpretation: each row of W is a "detector" or "feature extractor."
+Row 0 detects one pattern, row 1 detects another, row 2 detects a third.
+</pre>
+
+<h3>The Dot Product: The Atomic Operation</h3>
+
+<p>
+  The dot product of two vectors measures how much they "agree." It's the fundamental building block of everything:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+a = [2, 3, 4]
+b = [5, 6, 7]
+
+dot(a, b) = (2×5) + (3×6) + (4×7)
+          = 10 + 18 + 28
+          = 56
+</pre>
+
+<p>
+  <strong>Intuition:</strong> If both vectors point in the same direction, the dot product is large and positive. If they point in opposite directions, it's large and negative. If they're perpendicular, it's zero.
+</p>
+
+<div class="callout c-green">
+  <strong>Why This Matters</strong>
+  Dot products measure similarity. In embeddings, a high dot product between two embedding vectors means those words are semantically close. In attention (coming later), dot products between query and key vectors determine which tokens attend to which.
+</div>
+
+<hr>
+
+<h2>0.4 Word2Vec — Learning Static Embeddings</h2>
+
+<p>
+  We've now seen how embeddings are stored and manipulated mathematically. But where do these numbers come from? How does a network learn that "cat" and "dog" should have similar vectors?
+</p>
+
+<p>
+  <strong>Word2Vec</strong> (2013) was the first breakthrough: a simple, elegant training procedure that produced meaningful embeddings. Here's the insight:
+</p>
+
+<div class="callout c-purple">
+  <strong>The Distributional Hypothesis</strong>
+  Words that appear in similar contexts have similar meanings. If "cat" and "dog" both appear near "pet," "furry," "meow"/"bark," then their embeddings should be close in space.
+</div>
+
+<h3>The Skip-Gram Architecture</h3>
+
+<p>
+  Word2Vec uses a simple neural network with one hidden layer:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Input (one-hot)           Hidden (embedding)       Output (logits)
+5 dimensions       →      3 dimensions      →     5 dimensions
+[0,0,1,0,0]                [0.8,0.3,0.4]          [0.43, 0.48, 0.74, 0.49, 0.77]
+(select "sat")             (W1 projects)          (W2 projects)
+                                                   ↓ softmax
+                                                   [0.17, 0.18, 0.23, 0.18, 0.24]
+</pre>
+
+<p>
+  Training data comes from the corpus as (center_word, context_word) pairs. The task: given "sat," predict surrounding words like "cat," "on," "mat."
+</p>
+
+<h3>The Two Matrices: W1 and W2</h3>
+
+<p>
+  Word2Vec trains two weight matrices simultaneously:
+</p>
+
+<table class="no-break" style="margin: 1em 0;">
+  <thead>
+    <tr>
+      <th>Matrix</th>
+      <th>Shape</th>
+      <th>Role</th>
+      <th>After Training</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>W1</strong> (Input → Hidden)</td>
+      <td>(V × C) = (5 × 3)</td>
+      <td>"What is this word?"</td>
+      <td>Used as embeddings</td>
+    </tr>
+    <tr>
+      <td><strong>W2</strong> (Hidden → Output)</td>
+      <td>(C × V) = (3 × 5)</td>
+      <td>"What words surround it?"</td>
+      <td>Sometimes averaged with W1</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  Each row of W1 is a word's embedding. Each column of W2 is a word viewed as a "context word" — what does this word offer when it appears around others?
+</p>
+
+<h3>Worked Example: Forward Pass</h3>
+
+<p>
+  Let's process the pair (center="cat", target="sat") step by step:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+<span class="cc">Step 1: One-hot encode "cat"</span>
+input = [0, 1, 0, 0, 0]  ← only position 1 is "on"
+
+<span class="cc">Step 2: W1 matrix (5×3)</span>
+         Emb0  Emb1  Emb2
+"the":  [0.2   0.5   0.1]
+"cat":  [0.8   0.3   0.4]   ← we'll select this row
+"sat":  [0.1   0.9   0.2]
+"on":   [0.7   0.2   0.5]
+"mat":  [0.4   0.6   0.8]
+
+hidden = W1.T × input = [0.8, 0.3, 0.4]
+         ↑
+         The one-hot vector selects exactly row 1 (cat's embedding)!
+
+<span class="cc">Step 3: W2 matrix (3×5)</span>
+           "the"  "cat"  "sat"  "on"  "mat"
+Emb0:     [0.3    0.1    0.6    0.2   0.4]
+Emb1:     [0.5    0.8    0.2    0.7   0.3]
+Emb2:     [0.1    0.4    0.5    0.3   0.9]
+
+scores = W2.T × hidden
+       = [0.3  0.5  0.1] × [0.8]
+         [0.1  0.8  0.4]   [0.3]
+         [0.6  0.2  0.5]   [0.4]
+         [0.2  0.7  0.3]
+         [0.4  0.3  0.9]
+
+       = [(0.3×0.8 + 0.5×0.3 + 0.1×0.4),      ← score for "the"   = 0.43
+          (0.1×0.8 + 0.8×0.3 + 0.4×0.4),      ← score for "cat"   = 0.48
+          (0.6×0.8 + 0.2×0.3 + 0.5×0.4),      ← score for "sat"   = 0.74 ✓ HIGHEST
+          (0.2×0.8 + 0.7×0.3 + 0.3×0.4),      ← score for "on"    = 0.49
+          (0.4×0.8 + 0.3×0.3 + 0.9×0.4)]      ← score for "mat"   = 0.77
+
+<span class="cc">Step 4: Softmax</span>
+Sum = 0.43 + 0.48 + 0.74 + 0.49 + 0.77 = 2.91
+probabilities = scores / sum
+              = [0.15, 0.16, 0.25, 0.17, 0.26]
+
+The model correctly gives highest probability to "sat"! ✓
+</pre>
+
+<h3>Negative Sampling: Making Training Tractable</h3>
+
+<p>
+  Computing softmax over 50,000 words is expensive. Word2Vec uses a clever trick: instead of predicting all words, just distinguish real neighbors from random noise.
+</p>
+
+<div class="callout c-note">
+  <strong>Negative Sampling Intuition</strong>
+  Real pairs (center, context) should score high. Random pairs (center, random_word) should score low. We only compute loss for a small set of negative samples, not all 50,000 non-neighbors.
+</div>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+<span class="cc">With negative sampling:</span>
+
+Positive pair ("cat", "sat"):
+  score = dot(embedding_cat, embedding_sat) = 0.74
+  prob = sigmoid(0.74) = 0.68
+  target = 1 (this is a real context)
+  loss = -log(0.68) = 0.39  ← push embeddings closer
+
+Negative pair ("cat", "airplane"):
+  score = dot(embedding_cat, embedding_airplane) = 0.22
+  prob = sigmoid(0.22) = 0.55
+  target = 0 (random word, not context)
+  loss = -log(1 - 0.55) = -log(0.45) = 0.80  ← push apart
+
+Total loss ≈ average of these ≈ 0.6 (computed for multiple negatives)
+Gradients update W1 and W2 to minimize this loss.
+</pre>
+
+<h3>What Word2Vec Actually Learns</h3>
+
+<p>
+  After training on billions of (center, context) pairs from a large corpus:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px; font-family: monospace;">
+"cat"        → [0.65, 0.48, 0.72, ...]
+"dog"        → [0.63, 0.50, 0.71, ...]   ← very similar! (both pets)
+"kitten"     → [0.64, 0.47, 0.73, ...]   ← also similar
+
+"bank" (ambiguous)    → [0.45, 0.38, 0.51, ...]   ← compromise
+
+Famous arithmetic:
+king - man + woman ≈ queen
+[k.vectors] - [m.vectors] + [w.vectors] ≈ [q.vectors]
+</pre>
+
+<p>
+  The geometry of embedding space captures semantic relationships. Words that co-occur move toward each other. This is the power of unsupervised learning on unlabeled text.
+</p>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>
+      We need initial representations of words before we can build larger models. Word2Vec showed that a simple neural network trained to predict context can learn meaningful geometric embeddings from raw text, with no manual labeling.
+    </p>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual</div></div>
+    <div class="visual">
+      <div class="visual-title">WORD2VEC TRAINING LOOP</div>
+      <pre style="margin:0; font-size:0.85em;">
+Corpus text → Sliding window → (center, context) pairs
+                                   ↓
+                    Split: 80% positive, 20% negative samples
+                                   ↓
+                    Forward: center → W1 → hidden → W2 → softmax
+                                   ↓
+                    Loss: push positives close, negatives far
+                                   ↓
+                    Backprop: W1 and W2 gradients updated
+                                   ↓
+                    Result: meaningful embeddings learned
+      </pre>
+    </div>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code sketch</div></div>
+    <pre><span class="cc"># Simplified Word2Vec training step</span>
+center_id = 2653          <span class="cc"># "cat"</span>
+context_id = 1000        <span class="cc"># "sat"</span>
+
+embedding_center = W1[center_id, :]    <span class="cc"># extract row from W1</span>
+embedding_context = W2[:, context_id]  <span class="cc"># extract column from W2</span>
+
+score = dot(embedding_center, embedding_context)
+prob = sigmoid(score)
+loss = -log(prob)  <span class="cc"># positive pair should have high prob</span>
+
+<span class="cc"># Backprop updates W1 and W2 to reduce loss</span>
+gradient_W1 = ...
+gradient_W2 = ...
+W1 -= learning_rate * gradient_W1
+W2 -= learning_rate * gradient_W2
+    </pre>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insight</div></div>
+    <div class="callout c-key">
+      Word2Vec learns embeddings by predicting context. The hidden layer W1 becomes the embedding matrix. Training is efficient because negative sampling reduces the number of words we need to score. The resulting embeddings capture semantic meaning: similar words have similar vectors.
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<h2>0.5 Static vs Contextual Embeddings — The Motivation for Attention</h2>
+
+<p>
+  Word2Vec is powerful, but it has a critical limitation that motivated decades of follow-up research.
+</p>
+
+<h3>The "Bank" Problem</h3>
+
+<p>
+  Consider the word "bank." It has at least two distinct meanings:
+</p>
+
+<ul>
+  <li><strong>"river bank"</strong> — the ground beside a stream</li>
+  <li><strong>"deposit bank"</strong> — a financial institution</li>
+</ul>
+
+<p>
+  In a large corpus, "bank" appears in both contexts:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+"I walked along the river bank"
+"I deposited money at the bank"
+"The bank teller helped me"
+"The river bank was muddy"
+</pre>
+
+<p>
+  During Word2Vec training, the algorithm sees both contexts and updates "bank"'s embedding to be similar to both "river" and "deposit." The result: a single, static compromise vector.
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+embedding_bank = [0.45, 0.38, 0.51, ...]  ← single, fixed vector
+
+dot(bank, river)  = 0.72   ✓ high (shares river context)
+dot(bank, deposit) = 0.68  ✓ high (shares finance context)
+
+But which meaning is "bank" in THIS sentence?
+Word2Vec has no way to know. The vector is the same regardless.
+</pre>
+
+<div class="callout c-warn">
+  <strong>The Limitation</strong>
+  Word2Vec treats each word as having exactly one embedding, regardless of context. This is why it's called <strong>static</strong> embeddings. The vector for "bank" is identical whether the sentence is about rivers or money.
+</div>
+
+<h3>What We Need: Context-Dependent Representations</h3>
+
+<p>
+  Imagine if the network could compute different representations of "bank" depending on surrounding words:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+In "river bank":
+  bank_representation = [0.91, 0.13, 0.82, ...]  ← closer to "river"
+
+In "deposit bank":
+  bank_representation = [0.15, 0.87, 0.31, ...]  ← closer to "deposit"
+
+Same word, different vectors, determined by context!
+This is a "contextual" embedding.
+</pre>
+
+<p>
+  This is the motivation for RNNs, LSTMs, and ultimately Transformers. Each of these architectures solves a version of the same problem: how do we compute context-dependent representations?
+</p>
+
+<p>
+  We'll see this journey unfold in Part 0.5 and then throughout the tutorial.
+</p>
+
+<hr>
+
+<h2>0.6 Tokenisation Revisited — Setting Up Phase 1</h2>
+
+<p>
+  Before diving into the nanochat build, let's clarify tokenisation's place in the pipeline.
+</p>
+
+<p>
+  Tokenisation is the process of converting raw text into token IDs. Modern tokenizers use <strong>subword</strong> encoding (like Byte Pair Encoding, or BPE) rather than splitting on word boundaries. This allows models to handle misspellings, rare words, and multilingual text more gracefully.
+</p>
+
+<p>
+  Some examples from real tokenizers:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+"unhappiness"  → ["un", "happiness"]     (subword tokens)
+"600"          → ["6", "0", "0"]         (digit-per-token)
+"❤️"           → [heart_token]           (special characters)
+"<|endoftext|>"→ [eos_token]             (special end-of-text marker)
+</pre>
+
+<table class="no-break" style="margin: 1em 0;">
+  <thead>
+    <tr>
+      <th>Model</th>
+      <th>Vocab Size</th>
+      <th>Embedding Matrix Size</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>BERT</td>
+      <td>30,522</td>
+      <td>(30,522 × 768) ≈ 23M params</td>
+    </tr>
+    <tr>
+      <td>GPT-2</td>
+      <td>50,257</td>
+      <td>(50,257 × 768) ≈ 39M params</td>
+    </tr>
+    <tr>
+      <td>GPT-4</td>
+      <td>~100,000</td>
+      <td>(100,000 × 1536) ≈ 154M params</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  The embedding matrix accounts for a significant portion of model parameters! Larger vocabularies mean larger models just for token representations.
+</p>
+
+<div class="callout c-green">
+  <strong>Phase 1 Overview</strong>
+  The tutorial's Phase 1 covers tokenisation in detail, including BPE, special tokens, and vocabulary construction. Part 0 (this section) provides the conceptual foundation—why we need numbers, how vectors work, how matrices transform them. Phase 1 builds from here: the practical details of turning text into token IDs using your specific tokenizer.
+</div>
+
+<div class="section-break"></div>
+
+<div class="phase-header no-break">
+  <span class="phase-num">0.5</span>
+  <div class="phase-title">Part 0.5: The Sequence-Modelling Lineage</div>
+  <div class="phase-sub">From Word2Vec to Transformers: How each architecture solved what the previous one couldn't</div>
+</div>
+
+<p>
+  We've established that Word2Vec learns static embeddings through clever matrix operations. But Word2Vec has no concept of sequence or order. "cat sat" and "sat cat" are identical to it—just two words appearing in context.
+</p>
+
+<p>
+  This section traces the intellectual lineage of sequence modelling: the chain of architectures that progressively unlocked longer memory, more parallelism, and richer contextual understanding. Understanding this arc is crucial before diving into nanochat's transformer implementation.
+</p>
+
+<hr>
+
+<h2>L.1 The Problem of Order — Word2Vec Is Bag-of-Words</h2>
+
+<p>
+  Word2Vec operates on context windows, but it treats words as an unordered set.
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+Sentence: "The cat sat on the mat"
+Window around "sat" (size 2): ["cat", "on"]
+
+Word2Vec never encodes that "cat" comes BEFORE and "on" comes AFTER.
+It just knows: "cat" and "on" are both in sat's neighborhood.
+
+"on sat cat" has the same window context.
+Word2Vec treats both identically.
+</pre>
+
+<div class="callout c-warn">
+  <strong>The Limitation</strong>
+  Order matters in language. "Dog bites man" means something very different from "Man bites dog." Word2Vec cannot distinguish these.
+</div>
+
+<p>
+  To handle order, we need a model that processes words <strong>sequentially</strong>, remembering what came before and using that to inform predictions about what comes next.
+</p>
+
+<p>
+  Enter the RNN.
+</p>
+
+<hr>
+
+<h2>L.2 RNN — Embeddings Meet Sequence</h2>
+
+<p>
+  The Recurrent Neural Network (RNN) adds one revolutionary idea: <strong>hidden state memory</strong> that is updated at every time step.
+</p>
+
+<h3>The Core Equation</h3>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+h_t = tanh(W_x × x_t + W_h × h_{t-1} + b)
+
+Where:
+  h_t       = hidden state at time t (the "memory")
+  x_t       = input at time t (word embedding from Word2Vec)
+  h_{t-1}   = hidden state from previous time step (carries history)
+  W_x       = weight matrix for input transformation
+  W_h       = weight matrix for recurrent transformation
+  b         = bias
+  tanh      = squashing nonlinearity (outputs in [-1, 1])
+</pre>
+
+<p>
+  The beauty: the same weights W_x and W_h are reused at every time step. This allows the network to handle sequences of any length and learn a general rule for "how to combine a new word with the history so far."
+</p>
+
+<h3>Worked Example: Processing "cat sat"</h3>
+
+<p>
+  Let's step through two time steps with concrete numbers:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Setup:
+embedding_cat = [0.5, 0.3, 0.8]     (from Word2Vec)
+embedding_sat = [0.2, 0.7, 0.4]
+h_0 = [0.0, 0.0]                    (initial state, zeros)
+
+W_x = [[0.3, 0.5, 0.2],
+       [0.4, 0.1, 0.6]]             (hidden_dim=2, embed_dim=3)
+
+W_h = [[0.8, 0.2],
+       [0.3, 0.7]]
+
+b = [0.1, 0.1]
+
+<span class="cc">───────────────────────────────────────────</span>
+<span class="cc">TIME STEP 1: Processing "cat"</span>
+<span class="cc">───────────────────────────────────────────</span>
+
+x_1 = [0.5, 0.3, 0.8]
+
+W_x × x_1:
+Row 1: 0.3×0.5 + 0.5×0.3 + 0.2×0.8 = 0.15 + 0.15 + 0.16 = 0.46
+Row 2: 0.4×0.5 + 0.1×0.3 + 0.6×0.8 = 0.20 + 0.03 + 0.48 = 0.71
+Result: [0.46, 0.71]
+
+W_h × h_0:
+= [0, 0]  (h_0 is zeros)
+
+z_1 = [0.46, 0.71] + [0.0, 0.0] + [0.1, 0.1] = [0.56, 0.81]
+
+h_1 = tanh([0.56, 0.81])
+    = [tanh(0.56), tanh(0.81)]
+    = [0.508, 0.669]
+
+After "cat", the hidden state is [0.508, 0.669]
+This state carries information about the input "cat"
+
+<span class="cc">───────────────────────────────────────────</span>
+<span class="cc">TIME STEP 2: Processing "sat" (with history from "cat")</span>
+<span class="cc">───────────────────────────────────────────</span>
+
+x_2 = [0.2, 0.7, 0.4]
+h_1 = [0.508, 0.669]   ← THIS IS THE KEY: previous state carries "cat"
+
+W_x × x_2:
+Row 1: 0.3×0.2 + 0.5×0.7 + 0.2×0.4 = 0.06 + 0.35 + 0.08 = 0.49
+Row 2: 0.4×0.2 + 0.1×0.7 + 0.6×0.4 = 0.08 + 0.07 + 0.24 = 0.39
+Result: [0.49, 0.39]
+
+W_h × h_1:   ← The history!
+Row 1: 0.8×0.508 + 0.2×0.669 = 0.406 + 0.134 = 0.540
+Row 2: 0.3×0.508 + 0.7×0.669 = 0.152 + 0.468 = 0.620
+Result: [0.540, 0.620]
+
+z_2 = [0.49, 0.39] + [0.540, 0.620] + [0.1, 0.1]
+    = [1.13, 1.11]
+
+h_2 = tanh([1.13, 1.11])
+    = [0.810, 0.805]
+
+The hidden state h_2 = [0.810, 0.805] now contains information
+about BOTH "cat" and "sat"!
+</pre>
+
+<p>
+  Notice: at time step 1, W_h × h_0 contributes nothing (zeros × anything = 0). But at time step 2, it contributes [0.540, 0.620], pulling the hidden state in a specific direction based on the previous state. This is how context accumulates.
+</p>
+
+<h3>How the Same Weights Produce Different Meanings</h3>
+
+<p>
+  Here's the genius: despite using identical weights, the RNN computes different representations for the same word in different contexts:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Scenario A: "river bank"
+h_river = tanh(W_x × embedding_river + W_h × h_0 + b)
+        = [0.6, 0.3]
+
+h_bank = tanh(W_x × embedding_bank + W_h × [0.6, 0.3] + b)
+       = [0.82, 0.21]   ← influenced by river!
+
+Scenario B: "deposit bank"
+h_deposit = tanh(W_x × embedding_deposit + W_h × h_0 + b)
+          = [0.2, 0.8]
+
+h_bank = tanh(W_x × embedding_bank + W_h × [0.2, 0.8] + b)
+       = [0.19, 0.91]   ← influenced by deposit!
+
+Same embedding_bank, same W_x and W_h, BUT:
+- When h_{t-1} = [0.6, 0.3], we get h_t = [0.82, 0.21]
+- When h_{t-1} = [0.2, 0.8], we get h_t = [0.19, 0.91]
+
+The hidden state from context changes the output!
+This is contextual representation at work.
+</pre>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>
+      Word2Vec embeddings are static—one vector per word forever. But meaning depends on context. RNNs solve this by computing a new hidden state at every step that depends on both the current input and the accumulated history. The same word produces different representations based on what came before.
+    </p>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual</div></div>
+    <div class="visual">
+      <div class="visual-title">RNN UNROLLED IN TIME</div>
+      <pre style="margin:0; font-size:0.85em;">
+h_0=[0,0]       h_1=[0.51,0.67]    h_2=[0.81,0.81]    h_3=[...]
+  │                  │                  │                 │
+  ├─ x_1 ──→ RNN ────┤              RNN ────────→ RNN ────→
+  (embed:             (embed:            (embed:
+   cat)               sat)               on)
+
+Same RNN cell (W_x, W_h, b) at all positions.
+Input changes (cat, sat, on), history changes (h_0 → h_1 → h_2).
+Result: different output at each step, even with same weights.
+      </pre>
+    </div>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code sketch</div></div>
+    <pre><span class="cc"># Simple RNN forward pass</span>
+h = [0.0, 0.0]  <span class="cc"># initialize</span>
+
+<span class="ck">for</span> t <span class="ck">in</span> <span class="ck">range</span>(T):
+    x_t = embeddings[token_ids[t]]  <span class="cc"># get embedding</span>
+    z = W_x @ x_t + W_h @ h + b     <span class="cc"># compute pre-activation</span>
+    h = np.tanh(z)                   <span class="cc"># apply nonlinearity</span>
+    output = W_out @ h               <span class="cc"># predict next token (optional)</span>
+
+<span class="cc"># At each step, h gets overwritten with new value</span>
+<span class="cc"># BUT the information from x_t is preserved (mixed in via W_h @ h)</span>
+    </pre>
+  </div>
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insight</div></div>
+    <div class="callout c-key">
+      The RNN's hidden state is the bridge between Word2Vec and modern language models. It's a vector that evolves through time, mixing the current input with accumulated history. Same weights, different history → different outputs. This is how order and context finally matter.
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<h2>L.3 Vanishing Gradients — Why RNNs Forget</h2>
+
+<p>
+  RNNs are powerful, but they have a fatal flaw: gradients vanish during backpropagation through time.
+</p>
+
+<h3>Backpropagation Through Time (BPTT)</h3>
+
+<p>
+  During training, we compute loss for the entire sequence and backpropagate gradients backward in time:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Forward:  h_0 → h_1 → h_2 → ... → h_T → loss
+Backward: h_0 ← h_1 ← h_2 ← ... ← h_T ← loss
+
+At each step backward, the gradient is multiplied by:
+  ∂h_t/∂h_{t-1} = tanh'(z_t) × W_h
+
+Where tanh'(z) = 1 - tanh²(z) is the derivative of tanh.
+</pre>
+
+<p>
+  Let's trace what happens:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+tanh derivative values at typical inputs:
+  z = 0.0:  tanh'(z) = 1.00  (max possible)
+  z = 0.5:  tanh'(z) = 0.79
+  z = 1.0:  tanh'(z) = 0.42
+  z = 2.0:  tanh'(z) = 0.07  ← already small
+  z = 3.0:  tanh'(z) = 0.01  ← very small
+
+Typical W_h values: 0.3 to 0.7
+
+Combined per-step factor: tanh' × W_h ≈ 0.4 to 0.5
+</pre>
+
+<h3>Gradient Decay Over Time</h3>
+
+<p>
+  When the same small factor (≈0.4) is multiplied repeatedly:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Suppose we have a sequence of 50 tokens.
+Gradient at position T (output):    1.000
+Gradient at position T-5:           (0.4)^5  ≈ 0.010
+Gradient at position T-10:          (0.4)^10 ≈ 0.0001
+Gradient at position T-20:          (0.4)^20 ≈ 0.0000001
+Gradient at position 1:             (0.4)^50 ≈ 1e-20 ≈ 0
+
+Concrete example: 0.1^10 = 0.0000000001 = 1e-10
+</pre>
+
+<p>
+  The gradient at early positions is essentially zero. The network cannot learn from errors that depend on words at the beginning of the sequence.
+</p>
+
+<div class="callout c-warn">
+  <strong>The Problem</strong>
+  An RNN processing 50 words cannot meaningfully update its weights based on the first word's contribution. Early context is effectively ignored. Long-range dependencies (e.g., pronoun references spanning 30 words) cannot be learned.
+</div>
+
+<h3>Why This Happens</h3>
+
+<p>
+  RNNs have only one pathway for information and gradients:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+h_1 → h_2 → h_3 → ... → h_50
+
+At every step: h_new = tanh(W_x × x + W_h × h_old + b)
+
+Both the forward and backward passes go through the same repeated
+multiplication of W_h (forward) and its derivative (backward).
+
+With the same small factor applied 50 times, the signal dies.
+</pre>
+
+<p>
+  The fix requires a different architecture that provides an alternative, protected pathway for information to flow unchanged over many steps.
+</p>
+
+<hr>
+
+<h2>L.4 LSTM — The Cell State Highway</h2>
+
+<p>
+  The Long Short-Term Memory (LSTM) cell adds a brilliant solution: a second state variable, the <strong>cell state</strong>, that follows an additive update rule rather than a multiplicative one.
+</p>
+
+<h3>LSTM Architecture</h3>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+LSTM has TWO state variables at each time step:
+  - c_t: cell state (long-term memory, protected lane)
+  - h_t: hidden state (working memory, output)
+
+The cell state is updated additively:
+  c_t = f_t ⊙ c_{t-1} + i_t ⊙ c_tilde
+        ↑ forget old      ↑ add new
+
+Where f_t and i_t are gated values (between 0 and 1).
+</pre>
+
+<h3>The Gates: Learned Control**</h3>
+
+<p>
+  LSTM introduces three learned gates that control information flow:
+</p>
+
+<table class="no-break" style="margin: 1em 0;">
+  <thead>
+    <tr>
+      <th>Gate</th>
+      <th>Equation</th>
+      <th>Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Forget</strong></td>
+      <td><code>f_t = σ(W_f·[h_{t-1}, x_t] + b_f)</code></td>
+      <td>How much old cell state to keep? (0=forget all, 1=keep all)</td>
+    </tr>
+    <tr>
+      <td><strong>Input</strong></td>
+      <td><code>i_t = σ(W_i·[h_{t-1}, x_t] + b_i)</code></td>
+      <td>How much new info to add? (0=ignore, 1=accept fully)</td>
+    </tr>
+    <tr>
+      <td><strong>Output</strong></td>
+      <td><code>o_t = σ(W_o·[h_{t-1}, x_t] + b_o)</code></td>
+      <td>What to expose as hidden state? (0=hide, 1=expose)</td>
+    </tr>
+    <tr>
+      <td><strong>Candidate</strong></td>
+      <td><code>c_tilde_t = tanh(W_c·[h_{t-1}, x_t] + b_c)</code></td>
+      <td>What new values to potentially add to cell state?</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  <span class="pt">σ</span> is sigmoid, which outputs a value between 0 and 1—perfect for gates. ⊙ is element-wise multiplication.
+</p>
+
+<h3>The Key Equation: Why Gradients Don't Vanish**</h3>
+
+<p>
+  The cell state update is:
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+c_t = f_t ⊙ c_{t-1} + i_t ⊙ c_tilde_t
+
+Gradient flows backward as:
+  ∂c_t / ∂c_{t-1} = f_t
+
+This is the genius: the gradient is multiplied by f_t, which is
+LEARNED and can be close to 1.0!
+
+Contrast with RNN:
+  ∂h_t / ∂h_{t-1} = tanh'(z_t) × W_h ≈ 0.4 to 0.5 (fixed, small)
+
+With LSTM, the network learns WHEN to keep the gradient:
+  If f_t ≈ 1.0:  gradient ≈ 1.0 × 1.0 × ... × 1.0 = 1.0  ✓ NO VANISHING
+  If f_t ≈ 0.0:  gradient ≈ 0.0 (intentional forgetting)
+
+The model has explicit control over gradient flow!
+</pre>
+
+<p>
+  Over 50 timesteps with typical LSTM:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+RNN gradient at position 1:    ≈ (0.4)^50 ≈ 1e-20 ← nearly dead
+LSTM gradient at position 1:   ≈ (0.85)^50 ≈ 0.000001 ← still alive!
+
+(Assuming forget gates learn to stay at 0.85 on average)
+</pre>
+
+<div class="callout c-green">
+  <strong>The Breakthrough</strong>
+  LSTMs solved the vanishing gradient problem by introducing a protected additive path. Information can flow across long sequences because the gradient can stay large on the cell state's highway. This enabled training on sequences of hundreds or thousands of tokens.
+</div>
+
+<hr>
+
+<h2>L.5 Encoder-Decoder for Machine Translation</h2>
+
+<p>
+  Once LSTMs solved vanishing gradients, a new architecture pattern emerged for tasks like machine translation: the encoder-decoder architecture.
+</p>
+
+<h3>The Setup</h3>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Task: Translate English to French
+
+Input:  "The cat sat" (English)
+Output: "Le chat assis" (French)
+
+Encoder:
+  Processes English sequentially, compressing the entire meaning
+  into a single "thought vector"
+
+Decoder:
+  Uses the thought vector to generate French word-by-word
+</pre>
+
+<h3>Encoder Phase</h3>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Initial state: h_0_enc = [0, 0]
+
+Process "The":
+  h_1_enc = LSTM_enc(embedding_the, h_0_enc) = [0.2, 0.3]
+
+Process "cat":
+  h_2_enc = LSTM_enc(embedding_cat, h_1_enc) = [0.4, 0.5]
+
+Process "sat":
+  h_3_enc = LSTM_enc(embedding_sat, h_2_enc) = [0.7, 0.6]
+
+Final hidden state (the "thought vector"):
+  thought = h_3_enc = [0.7, 0.6]
+
+This vector contains compressed information about the entire
+English sentence. It becomes the seed for the decoder.
+</pre>
+
+<h3>Decoder Phase</h3>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+Initialize decoder with encoder's final state:
+  h_0_dec = thought = [0.7, 0.6]
+
+Start with special &lt;START&gt; token:
+  h_1_dec = LSTM_dec(embedding_START, h_0_dec)
+  logits_1 = W_out @ h_1_dec
+  probs_1 = softmax(logits_1)
+  token_1 = argmax(probs_1)  → "Le" (Le chat... French for "the cat")
+
+Feed output back in:
+  h_2_dec = LSTM_dec(embedding_Le, h_1_dec)
+  logits_2 = W_out @ h_2_dec
+  token_2 = argmax(softmax(logits_2))  → "chat"
+
+Again:
+  h_3_dec = LSTM_dec(embedding_chat, h_2_dec)
+  token_3 = argmax(softmax(...))  → "assis"
+
+Stop when we generate &lt;END&gt; token.
+
+Output: "Le chat assis" ✓
+</pre>
+
+<h3>The Bottleneck Problem</h3>
+
+<p>
+  Here's the critical issue:
+</p>
+
+<div style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+The encoder must compress an arbitrarily long sentence into a
+single vector. If the encoder processes a 50-word paragraph, all
+of that information flows through a single bottleneck: the final
+hidden state.
+
+thought_vector = [0.7, 0.6]  (just 2 numbers! or 256 or 1024...)
+
+The decoder must reconstruct the entire meaning of a 50-word
+paragraph from this tiny vector. Information is lost.
+</div>
+
+<div class="callout c-warn">
+  <strong>The Limitation</strong>
+  Encoder-decoder works well for short sequences but struggles with longer ones. A 256-dimensional thought vector cannot possibly capture all the nuance of a 1000-word article.
+</div>
+
+<p>
+  This bottleneck motivated the next breakthrough: instead of squeezing everything through one vector, let the decoder directly look back at all the encoder's hidden states.
+</p>
+
+<hr>
+
+<h2>L.6 The Bottleneck → Attention: The Leap</h2>
+
+<p>
+  The solution to the bottleneck is elegant and revolutionary: <strong>attention</strong>.
+</p>
+
+<p>
+  Instead of:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+encoder h_1, h_2, h_3, ... h_T  →  [compressed thought] → decoder
+</pre>
+
+<p>
+  We do:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px;">
+encoder h_1, h_2, h_3, ... h_T  → decoder can LOOK BACK at any h_i
+</pre>
+
+<h3>The Core Idea</h3>
+
+<p>
+  When the decoder is generating word t, it should be able to ask: "Which encoder hidden states are relevant to me right now?" Then it dynamically computes a weighted sum of all encoder states, weighted by relevance.
+</p>
+
+<pre style="background: #1e1e1e; color: #d4d4d4; padding: 1.2em; border-radius: 4px;">
+At decoder timestep 2 (generating "chat" from encoder "cat"):
+
+Decoder hidden state: h_2_dec = [0.45, 0.78]
+
+Attention query question:
+  "Which encoder states are relevant to my current goal?"
+
+Compute relevance scores (using dot products):
+  score_1 = dot(h_2_dec, h_1_enc)  =  0.34  ← "The"
+  score_2 = dot(h_2_dec, h_2_enc)  =  0.71  ← "cat"  ✓ HIGH!
+  score_3 = dot(h_2_dec, h_3_enc)  =  0.28  ← "sat"
+
+Apply softmax to get weights:
+  weight_1 = 0.18
+  weight_2 = 0.61   ← mostly attending to "cat"
+  weight_3 = 0.21
+
+Compute weighted sum of encoder states:
+  context = 0.18 × h_1_enc + 0.61 × h_2_enc + 0.21 × h_3_enc
+
+Concatenate with decoder state:
+  enhanced = [h_2_dec, context]
+
+This enhanced representation is rich with information about:
+  - What the decoder was thinking (h_2_dec)
+  - What parts of the input are relevant (context)
+
+Both pieces combined drive the prediction of "chat"
+</pre>
+
+<p>
+  This is the birth of attention. No information is lost to a bottleneck. The decoder can directly inspect every encoder state and pick what it needs.
+</p>
+
+<div class="callout c-key">
+  <strong>Why Attention Mattered</strong>
+  Attention replaced the bottleneck problem with a content-based lookup mechanism. The decoder isn't limited by trying to cram meaning into one vector. It can distribute its focus across all encoder states, dynamically, based on relevance. This unlocked translation quality for longer sequences.
+</div>
+
+<hr>
+
+<h2>L.7 Lineage Diagram: From Word2Vec to Transformers</h2>
+
+<p>
+  Let's visualize the complete intellectual lineage:
+</p>
+
+<pre style="background: #f5f5f5; padding: 1em; margin: 1em 0; border-radius: 4px; font-family: monospace; line-height: 1.8;">
+┌──────────────────────────────────────────────────────────────┐
+│         Word2Vec (2013) — Learned Projections               │
+├──────────────────────────────────────────────────────────────┤
+│  • W1 and W2 are projection matrices                          │
+│  • Embeddings capture semantic meaning                        │
+│  • Static: one vector per word, no context                   │
+│  • Problem: ignores word order and sentence structure        │
+└───────────────────┬──────────────────────────────────────────┘
+                    │
+                    └─────────────────┬────────────────────────┐
+                                      │                        │
+┌─────────────────────────────────────▼──────────────────────┐ │
+│         RNN (2014) — Embeddings Meet Sequence             │ │
+├──────────────────────────────────────────────────────────┤ │
+│  • Inherits Word2Vec embeddings as input (x_t)           │ │
+│  • Adds hidden state h_t that flows through time         │ │
+│  • h_t = tanh(W_x × x_t + W_h × h_{t-1} + b)            │ │
+│  • Can now represent context (same word, different h_t)  │ │
+│  • Problem: vanishing gradients limit memory             │ │
+└─────────────────────────────┬──────────────────────────────┘ │
+                              │                                │
+┌─────────────────────────────▼──────────────────────────────┐ │
+│         LSTM (2014+) — Protected Gradient Flow            │ │
+├──────────────────────────────────────────────────────────┤ │
+│  • Inherits RNN structure                                │ │
+│  • Adds cell state c_t with additive update              │ │
+│  • c_t = f_t ⊙ c_{t-1} + i_t ⊙ c_tilde_t               │ │
+│  • Gradient can flow unchanged (f_t ≈ 1.0)              │ │
+│  • Can now handle 100+ token dependencies               │ │
+│  • Problem: still sequential (slow to train)            │ │
+└─────────────────────────────┬──────────────────────────────┘ │
+                              │                                │
+┌─────────────────────────────▼──────────────────────────────┐ │
+│  Encoder-Decoder + Attention (2015) — Look Back          │ │
+├──────────────────────────────────────────────────────────┤ │
+│  • Encoder processes input, decoder generates output     │ │
+│  • Bottleneck problem: final hidden state too small      │ │
+│  • Solution: Attention — decoder attends to all encoder  │ │
+│  • states with learned relevance weights                 │ │
+│  • Still sequential, but can see full input when needed  │ │
+│  • Problem: still requires sequential encoding           │ │
+└─────────────────────────────┬──────────────────────────────┘ │
+                              │                                │
+└──────────────────────────────▼────────────────────────────────┘
+                               │
+        ┌──────────────────────┴──────────────────────┐
+        │                                              │
+┌───────▼─────────────────────────────┐     ┌────────▼─────────────────┐
+│ Transformer (2017) — Parallel All   │     │ Word2Vec idea (proj) →  │
+│                                     │     │ Attention (W_Q,W_K,W_V) │
+├─────────────────────────────────────┤     │                         │
+│  • Replaces RNN with self-attention │     │ Cell state idea (bypass)│
+│  • W_Q, W_K, W_V are the new W1/W2  │     │ → Residual connections │
+│  • Can process all tokens in parallel│     │                         │
+│  • Each token attends to all others │     │ Together: the lineage!  │
+│  • Can see future AND past          │     └─────────────────────────┘
+│  • Scales to billions of parameters │
+│  • Foundation for BERT, GPT, Claude │
+└─────────────────────────────────────┘
+</pre>
+
+<h3>What Each Architecture Added**</h3>
+
+<table class="no-break" style="margin: 1em 0;">
+  <thead>
+    <tr>
+      <th>Architecture</th>
+      <th>Innovation</th>
+      <th>Solved</th>
+      <th>Limitation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Word2Vec</strong></td>
+      <td>Learned projections (W1, W2)</td>
+      <td>How to represent meaning</td>
+      <td>No sequence/order</td>
+    </tr>
+    <tr>
+      <td><strong>RNN</strong></td>
+      <td>Hidden state through time</td>
+      <td>How to process sequences</td>
+      <td>Vanishing gradients</td>
+    </tr>
+    <tr>
+      <td><strong>LSTM</strong></td>
+      <td>Cell state with gates</td>
+      <td>Long-range dependencies</td>
+      <td>Still sequential/slow</td>
+    </tr>
+    <tr>
+      <td><strong>Attention</strong></td>
+      <td>Dynamic relevance lookup</td>
+      <td>Bottleneck problem</td>
+      <td>Still needs RNN encoder</td>
+    </tr>
+    <tr>
+      <td><strong>Transformer</strong></td>
+      <td>Self-attention everywhere</td>
+      <td>Parallelism + global context</td>
+      <td>Quadratic memory in seq len</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>L.8 The Unifying Thread**</h2>
+
+<p>
+  Every architecture in this lineage answers the same fundamental question, with increasing power:
+</p>
+
+<div style="background: #f5f5f5; padding: 1.5em; margin: 1em 0; border-radius: 4px; text-align: center; font-size: 1.05em; font-weight: 500;">
+  Given a sequence of words, what is the richest possible representation of meaning that lets us predict what comes next?
+</div>
+
+<ul>
+  <li><strong>Word2Vec:</strong> Meaning lives in geometric space. Similar words cluster together.</li>
+  <li><strong>RNN:</strong> Meaning accumulates through time. A hidden state that evolves with each word.</li>
+  <li><strong>LSTM:</strong> Important meaning needs a protected highway. A cell state that gates information.</li>
+  <li><strong>Transformer:</strong> Meaning comes from direct comparison of all tokens. Every token attends to every other token, computing relevance on the fly.</li>
+</ul>
+
+<p>
+  None of these architectures discarded the previous one's insights. They generalized them:
+</p>
+
+<ul>
+  <li>RNN inherits Word2Vec embeddings</li>
+  <li>LSTM inherits RNN's sequence processing and adds a bypass (cell state)</li>
+  <li>Attention inherits the LSTM's bypass idea and applies it globally</li>
+  <li>Transformer inherits all the projection ideas and applies them three ways (Q, K, V)</li>
+</ul>
+
+<p>
+  This is the true lineage: each step solved what the previous step couldn't, while keeping the good parts.
+</p>
+
+<hr>
+
+<div class="callout c-purple">
+  <strong>Transition: Now We Build</strong>
+  We've traced the intellectual journey from Word2Vec through Transformers. Each architecture solved a real problem. Each brought us closer to the present.
+  <br><br>
+  Now, the nanochat tutorial hands us the practical implementation: tokenisation (Phase 1), embeddings (Phase 2), attention mechanics (Phase 3+), and the complete forward pass. You'll see how these historical ideas manifest in actual code and operations.
+  <br><br>
+  The foundations are yours. Phase 1 begins the build.
 </div>
 
 <div class="section-break"></div>
@@ -1469,9 +2859,1108 @@ optimizer = torch.optim.AdamW([                             <span class="ptag">P
   </ol>
 </div>
 
-<div class="callout c-note no-break">
-  <strong>Current stopping point — you are here</strong>
-  Phases 1, 2, and 3.1 complete. Next up: 3.2 attention scores + causal mask, 3.3 softmax + value aggregation, 3.4 multi-head concat and output projection — then Phase 4 (training loop) and Phase 5 (generation / sampling).
+
+<!-- ══════════════════════════════════════════════════════════════
+     PHASES 3.2 → 3.4, 4, 5, 6+7, AND CONCEPTUAL LINEAGE
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">3.2</span>
+  <div>
+    <div class="phase-title">Attention Scores and Causal Masking</div>
+    <div class="phase-sub">Q @ K<sup>T</sup> — The relevance matrix, and why future tokens must be blocked</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>After projecting each token into Query, Key, and Value spaces, the model must decide: <em>for each token, which other tokens are most relevant?</em> Self-attention answers this by computing a <strong>relevance score</strong> between every pair of tokens using the dot product <code>Q @ K</code><sup>T</sup>. A high score means "these two tokens belong together in understanding the context." Then we apply a causal mask to prevent the model from cheating — attending to tokens it hasn't seen yet during generation.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — from scores to weights</div></div>
+    <div class="visual">
+      <div class="visual-title">SHAPE FLOW</div>
+      <div class="shape-flow">
+        <span class="sf-note">Q shape        </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, C) = (12, 1024, 384)    </span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">K<sup>T</sup> shape       </span><span class="sf-arrow">→ </span><span class="sf-shape">(C, T) transpose = (384, 1024)    </span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">Q @ K<sup>T</sup>       </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, T) = (12, 1024, 1024)    </span><span class="sf-note">raw scores, shape = (seq, seq)</span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">Scale by √d_h  </span><span class="sf-arrow">→ </span><span class="sf-shape">÷ √64 = ÷ 8    </span><span class="sf-note">keep variance stable</span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">Apply mask     </span><span class="sf-arrow">→ </span><span class="sf-shape">set upper triangle to −∞    </span><span class="sf-note">future tokens become zero weight</span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">Softmax        </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, T) = (12, 1024, 1024)    </span><span class="sf-note">each row sums to 1.0</span>
+      </div>
+    </div>
+
+    <p style="font-size: 0.95rem; margin-top: 1.5rem"><strong>A small worked example — token 3 attends to tokens 0, 1, 2, 3 only:</strong></p>
+    <pre><code class="cc"># Scores for token "sat" (position 3) attending to all visible tokens:
+#   "The"(0)  "cat"(1)  "sat"(2)  "sat"(3)  "mat"(4) future...
+scores = [  2.1,      3.8,       1.5,       2.2,      −∞  ... ]  ← future set to -∞
+
+# After scaling (÷8):
+scaled = [  0.26,     0.475,     0.19,      0.275,    −∞  ... ]
+
+# After softmax:
+weights = [ 0.18,     0.32,      0.16,      0.20,     0.0 ... ]  ← zeros where was -∞
+#           ^ 18% to The, 32% to cat, 16% to sat(itself), 20% to sat(as object), 0% future</code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code</div></div>
+    <pre><code><span class="ck">def</span> attention_forward(Q, K, V, causal_mask):
+    <span class="cc"># (B, n_h, T, d_h) for each of Q, K, V</span>
+
+    <span class="cc"># Step 1: raw scores</span>
+    scores = Q @ K.transpose(-2, -1)  <span class="cc"># shape: (B, n_h, T, T)</span>
+
+    <span class="cc"># Step 2: scale by sqrt(d_h) to stabilize variance</span>
+    scores = scores / math.sqrt(d_h)  <span class="cc"># (12, 6, 1024, 1024) ÷ 8</span>
+
+    <span class="cc"># Step 3: apply causal mask</span>
+    <span class="cc"># Lower triangle = future tokens</span>
+    scores = scores.masked_fill(causal_mask == 0, float(<span class="cs">'-inf'</span>))
+
+    <span class="cc"># Step 4: softmax (stable because of scaling + masking)</span>
+    weights = torch.softmax(scores, dim=-1)  <span class="cc"># normalize per row</span>
+
+    <span class="cc"># Step 5: apply to values (next phase)</span>
+    output = weights @ V  <span class="cc"># (B, n_h, T, d_h)</span>
+
+    <span class="ck">return</span> output</code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insights</div></div>
+    <div class="callout c-key">
+      <strong>Scaling prevents softmax collapse.</strong> Without dividing by √d_h, dot products in high dimensions (384) become huge — softmax becomes nearly one-hot (all weight on one token). Scaling by √64=8 keeps scores reasonable, producing smoother attention distributions that learn better.
+    </div>
+    <div class="callout c-warn">
+      <strong>Causal masking is essential for autoregressive models.</strong> During training, if token 10 could attend to token 15, the model would "know" the future. At inference time, token 15 doesn't exist yet, so the model would fail. Masking during training mirrors the inference constraint: never peek ahead.
+    </div>
+    <div class="callout c-purple">
+      <strong>The YouTube search analogy returns here.</strong> Q @ K is like searching a database: "How well does this token's query match other tokens' advertisements?" High dot product = good match = high attention weight. The causal mask simply removes future results from the search.
+    </div>
+  </div>
+</div>
+
+<div class="phase-header">
+  <span class="phase-num">3.3</span>
+  <div>
+    <div class="phase-title">Softmax and Value Aggregation</div>
+    <div class="phase-sub">Where context actually flows — weighted sum of values</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>Attention scores tell us <em>how much</em> to listen to each token. Now we aggregate the actual information. Softmax converts scores into a probability distribution (all non-negative, sum to 1), then we compute a weighted average of the Value vectors. This is where semantic content flows between tokens. Token A doesn't send a message to Token B — instead, B computes a weighted mixture of all tokens' values, weighted by how relevant B decided each was.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — the weighted aggregation</div></div>
+    <div class="visual">
+      <div class="visual-title">ONE TOKEN'S ATTENTION OUTPUT</div>
+      <pre style="font-size: 0.85rem; background: #f8f8f8; padding: 1rem; border-radius: 4px">
+Imagine token "sat" (position 3) and its attention weights:
+  weights = [0.18, 0.32, 0.16, 0.20, ...]  ← (normalized to sum=1)
+            T0    T1    T2    T3    T4+
+
+Values available:
+  V_The  = [0.52, -0.31, 0.88, ...]  384-dim
+  V_cat  = [0.71,  0.44, 0.29, ...]  384-dim
+  V_sat  = [0.15,  0.67, 0.42, ...]  384-dim  (itself)
+  V_past = [0.48, -0.12, 0.55, ...]  384-dim
+
+new_sat = 0.18 × V_The + 0.32 × V_cat + 0.16 × V_sat + 0.20 × V_past + ...
+        = [0.18×0.52 + 0.32×0.71 + ...,
+           0.18×(-0.31) + 0.32×0.44 + ...,
+           ...]
+        = [0.39, 0.21, 0.53, ...]  ← NEW representation of "sat"
+
+"sat" now encodes:
+  32% of "cat" (the subject)
+  20% of "past tense" context
+  18% of "The" (article signal)
+  16% of itself (identity preserved)
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code</div></div>
+    <pre><code><span class="ck">def</span> softmax_and_aggregate(scores, V, causal_mask):
+    <span class="cc"># scores shape: (B, n_h, T, T)</span>
+    <span class="cc"># V shape:      (B, n_h, T, d_h)</span>
+
+    <span class="cc"># Step 1: mask before softmax</span>
+    scores = scores.masked_fill(causal_mask == 0, float(<span class="cs">'-inf'</span>))
+
+    <span class="cc"># Step 2: softmax per row (last dimension)</span>
+    weights = torch.softmax(scores, dim=-1)  <span class="cc"># each row sums to 1</span>
+    <span class="cc"># Now shape: (B, n_h, T, T)</span>
+    <span class="cc"># weights[b, h, i, j] = attention of token i to token j</span>
+
+    <span class="cc"># Step 3: weighted sum of values</span>
+    <span class="cc"># matrix multiply: (B, n_h, T, T) @ (B, n_h, T, d_h)</span>
+    output = weights @ V
+    <span class="cc"># Output shape: (B, n_h, T, d_h)</span>
+    <span class="cc"># Each output token is a mixture of input values!</span>
+
+    <span class="ck">return</span> output, weights</code></pre>
+
+    <p style="font-size: 0.9rem; margin-top: 1rem"><strong>Matrix multiply intuition:</strong> <code>weights @ V</code> is a dot product of each row of <code>weights</code> with each column of <code>V</code>. Since each row of weights sums to 1, the output is a weighted average of the rows of V — exactly what we want.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insight</div></div>
+    <div class="callout c-green">
+      <strong>This is where context flows.</strong> The attention mechanism is not about "sending a message." It is about each token <em>pulling</em> a mixture of other tokens' representations. The weights are learned: Q and K are optimized so that relevant tokens get high weights, irrelevant ones low weights. V carries the content. Over layers, tokens progressively blend contextual information, building richer representations.
+    </div>
+    <div class="callout c-note">
+      <strong>Why separate softmax and aggregate?</strong> Pedagogically, they are two operations: softmax normalizes the scores, aggregation applies them. Computationally, they can be fused (PyTorch calls this <code>F.scaled_dot_product_attention</code>) for speed and numerical stability. For clarity in nanochat, they are separate.
+    </div>
+  </div>
+</div>
+
+<div class="phase-header">
+  <span class="phase-num">3.4</span>
+  <div>
+    <div class="phase-title">Multi-Head Concat and Output Projection</div>
+    <div class="phase-sub">Merging specialist perspectives back into a shared space</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>After computing attention independently in each of 6 heads (each working on 64 of the 384 dimensions), we must merge the results back. Head 0 may have learned "grammar patterns," Head 1 "semantic similarity," Head 2 "proximity." If we just concatenate them, we get 6×64=384 dims back, but the model has no way to decide which head insights matter. The output projection <code>W_O</code> is a learned matrix that combines head outputs, deciding how much to weight each head's perspective for the current task.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — multi-head merge</div></div>
+    <div class="visual">
+      <div class="visual-title">SHAPE FLOW</div>
+      <div class="shape-flow">
+        <span class="sf-note">After 6 heads  </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, n_h, T, d_h) = (12, 6, 1024, 64)    </span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">Transpose     </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, n_h, d_h) = (12, 1024, 6, 64)    </span><span class="sf-note">group by token</span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">Contiguous   </span><span class="sf-arrow">→ </span><span class="sf-shape">realign memory    </span><span class="sf-note">prepare for reshape</span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">View/Reshape  </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, C) = (12, 1024, 384)    </span><span class="sf-note">merge 6×64 → 384</span>
+      </div>
+      <div class="shape-flow">
+        <span class="sf-note">W_O @ x       </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, C) = (12, 1024, 384)    </span><span class="sf-note">blend head outputs</span>
+      </div>
+    </div>
+
+    <p style="font-size: 0.9rem; margin-top: 1rem"><strong>The transpose-contiguous-view pattern:</strong> After attention, each head's output is scattered across the batch and head dimensions. <code>transpose(-2, -1)</code> moves the head dimension next to the embedding dimension, <code>.contiguous()</code> makes memory layout sequential (PyTorch requirement for reshape), then <code>.view(B, T, C)</code> merges the heads.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code — nanochat Block.forward</div></div>
+    <pre><code><span class="ck">class</span> Block(nn.Module):
+    <span class="ck">def</span> __init__(self, config):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(config.n_embd)
+        self.attn = CausalSelfAttention(config)
+        self.ln2 = nn.LayerNorm(config.n_embd)
+        self.mlp = MLP(config)
+
+    <span class="ck">def</span> forward(self, x):
+        <span class="cc"># x shape: (B, T, C) = (12, 1024, 384)</span>
+
+        <span class="cc"># ─── Attention block ───</span>
+        x = x + self.attn(self.ln1(x))  <span class="cc"># residual connection (Phase 4.1)</span>
+
+        <span class="cc"># ─── FFN block ───</span>
+        x = x + self.mlp(self.ln2(x))   <span class="cc"># residual connection (Phase 4.3)</span>
+
+        <span class="ck">return</span> x
+
+
+<span class="ck">class</span> CausalSelfAttention(nn.Module):
+    <span class="ck">def</span> __init__(self, config):
+        super().__init__()
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)  <span class="cc"># Q, K, V projections</span>
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd)  <span class="cc"># W_O: output projection</span>
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+        self.register_buffer(<span class="cs">"bias"</span>, torch.tril(torch.ones(config.block_size, config.block_size)))
+
+    <span class="ck">def</span> forward(self, x):
+        <span class="cc"># (B, T, C) → project to Q, K, V</span>
+        B, T, C = x.shape
+        qkv = self.c_attn(x)  <span class="cc"># (B, T, 3C)</span>
+        q, k, v = qkv.split(self.n_embd, dim=-1)
+
+        <span class="cc"># Reshape for multi-head: (B, T, C) → (B, T, n_h, d_h) → (B, n_h, T, d_h)</span>
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+
+        <span class="cc"># Attention: (B, n_h, T, T)</span>
+        scores = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(C // self.n_head))
+        scores = scores.masked_fill(self.bias[:T, :T] == 0, float(<span class="cs">'-inf'</span>))
+        attn = torch.softmax(scores, dim=-1)
+
+        <span class="cc"># Aggregate: (B, n_h, T, d_h)</span>
+        out = attn @ v
+
+        <span class="cc"># ═══ PHASE 3.4: MERGE HEADS ═══</span>
+        <span class="cc"># (B, n_h, T, d_h) → (B, T, n_h, d_h)</span>
+        out = out.transpose(1, 2)
+        <span class="cc"># Reshape back to (B, T, C)</span>
+        out = out.contiguous().view(B, T, C)
+        <span class="cc"># Project output: apply W_O</span>
+        out = self.c_proj(out)
+
+        <span class="ck">return</span> out</code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insights</div></div>
+    <div class="callout c-key">
+      <strong>W_O is not optional — it is how the model learns which heads to trust.</strong> Imagine Head 3 learns "coreference resolution" (tracking pronouns) and Head 5 learns "random noise." W_O's gradients during training will learn to give Head 3 high weight and Head 5 low weight. Without W_O, the heads would be concatenated with fixed mixing — no specialization.
+    </div>
+    <div class="callout c-note">
+      <strong>The transpose-contiguous-view sequence is a PyTorch idiom.</strong> After <code>transpose(1, 2)</code>, the tensor is no longer stored contiguously in memory — it is a view with a reordered stride. <code>.contiguous()</code> reallocates memory to be linear, which <code>.view()</code> requires. This is purely a memory layout issue, not a semantic one.
+    </div>
+    <div class="callout c-purple">
+      <strong>Why "contiguous" is necessary:</strong> <code>.view()</code> reshapes a tensor assuming its elements are stored linearly. After <code>.transpose()</code>, strides are non-linear (memory jumps), so view would give the wrong result. <code>.contiguous()</code> reallocates to linear order. Modern PyTorch has <code>.reshape()</code> which handles both cases automatically.
+    </div>
+  </div>
+</div>
+
+<div class="phase-header">
+  <span class="phase-num">4</span>
+  <div>
+    <div class="phase-title">The Rest of the Block — Residuals, LayerNorm, and Feed-Forward</div>
+    <div class="phase-sub">Three subsystems that stabilize depth, normalize signals, and reason about context</div>
+  </div>
+</div>
+
+<h3>Phase 4.1: Residual Connections</h3>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>Deep networks face a fundamental problem: gradients shrink as they backpropagate through layers. In a 12-layer transformer without residuals, gradients can vanish before reaching early layers, making them impossible to train. Residual connections solve this by adding a direct shortcut: <code>output = x + f(x)</code> instead of <code>output = f(x)</code>. This preserves the original signal while applying small contextual refinements.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — the gradient highway</div></div>
+    <div class="visual">
+      <div class="visual-title">WITHOUT RESIDUALS — Gradient shrinks at each layer</div>
+      <pre style="font-size: 0.85rem; background: #fef5f5; padding: 1rem; border-radius: 4px">
+Loss gradient:    8.0
+After Layer 12:   8.0 × 0.1 = 0.8       (each layer derivative ~0.1)
+After Layer 11:   0.8 × 0.1 = 0.08
+...
+After Layer 1:    8.0 × (0.1)^12 ≈ 0.00000008   ← nearly zero!
+
+Layer 1 barely learns anything!
+      </pre>
+
+      <div class="visual-title">WITH RESIDUALS — Gradient stays strong everywhere</div>
+      <pre style="font-size: 0.85rem; background: #f0fdf4; padding: 1rem; border-radius: 4px">
+output = x + f(x)
+doutput/dx = 1 + df(x)/dx
+                ↑
+           This "1" is the key!
+
+Loss gradient:      8.0
+After Layer 12:     8.0 × (1 + 0.1) = 8.8
+After Layer 11:     8.8 × (1 + 0.1) = 9.68
+...
+After Layer 1:      stays large throughout!
+
+Every layer receives strong training signal!
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Concrete arithmetic example</div></div>
+    <pre><code><span class="cc"># Simple 2-layer network training to predict a target</span>
+<span class="cc"># Layer 1: f(x) = 2x (derivative = 2)</span>
+<span class="cc"># Layer 2: g(x) = 3x (derivative = 3)</span>
+<span class="cc"># Input: x = 1.0, Target = 10.0</span>
+
+<span class="cc"># WITHOUT RESIDUALS:</span>
+<span class="cc"># Forward:</span>
+after_layer_1 = 2.0 * 1.0 = 2.0
+after_layer_2 = 3.0 * 2.0 = 6.0
+loss = (6.0 - 10.0)^2 = 16.0
+
+<span class="cc"># Backward:</span>
+dloss_dL2 = 2*(6.0 - 10.0) = -8.0
+dL2_dinput = 3.0
+dinput_dL1 = dloss_dL2 * dL2_dinput = -8.0 * 3 = -24.0  ← only -24 signal to L1
+
+dL1_dinput = 2.0
+dfinal_dx = -24.0 * 2.0 = -48.0  ← large loss gradient, but already far back!
+
+
+<span class="cc"># WITH RESIDUALS:</span>
+<span class="cc"># Forward:</span>
+after_layer_1 = 1.0 + 2.0*1.0 = 3.0
+after_layer_2 = 3.0 + 3.0*3.0 = 12.0
+loss = (12.0 - 10.0)^2 = 4.0
+
+<span class="cc"># Backward:</span>
+dloss_dL2 = 2*(12.0 - 10.0) = 4.0
+dL2_dinput = 1.0 + 3.0 = 4.0  ← residual adds constant 1!
+dinput_dL1 = 4.0 * 4.0 = 16.0  ← much larger signal!
+
+dL1_dinput = 1.0 + 2.0 = 3.0
+dfinal_dx = 16.0 * 3.0 = 48.0  ← strong gradient all the way back!</code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">The sculptor analogy</div></div>
+    <div class="callout c-purple">
+      <strong>Building a sculpture.</strong> Imagine starting with a rough block of stone (initial embedding). Without residuals, Layer 1 discards the block and starts carving a new shape. If that shape is wrong, all downstream layers inherit the mistake. With residuals, Layer 1 makes small refinements to the block. Layer 2 refines further. By Layer 12, the original block (with identity information) is still present, but heavily sculpted by 12 refinements. Each layer is a small chisel mark, not a restart.
+    </div>
+  </div>
+</div>
+
+<div class="section-break"></div>
+
+<h3>Phase 4.2: Layer Normalization</h3>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>After a residual addition (<code>x + f(x)</code>), values can have wildly different scales across dimensions. Some dimensions might be 5.0, others -0.1. When these are fed into the next layer's Q, K, V projections, the matrix multiplies become numerically unstable and training diverges. Layer normalization rescales each token's vector to have mean 0 and standard deviation 1, stabilizing the signal for the next layer.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — step-by-step normalization</div></div>
+    <div class="visual">
+      <div class="visual-title">WORKED EXAMPLE — normalize a 4-dim token vector</div>
+      <pre style="font-size: 0.85rem; background: #f8f8f8; padding: 1rem; border-radius: 4px">
+Input: x = [3.02, -1.49, 3.77, 0.37]  ← wildly different magnitudes
+
+Step 1: Compute mean
+  μ = (3.02 + (-1.49) + 3.77 + 0.37) / 4 = 6.67 / 4 = 1.668
+
+Step 2: Compute standard deviation
+  Deviations from mean: [3.02-1.668, -1.49-1.668, 3.77-1.668, 0.37-1.668]
+                      = [1.352, -3.158, 2.102, -1.298]
+
+  Squared deviations: [1.828, 9.973, 4.418, 1.685]
+  Variance = (1.828 + 9.973 + 4.418 + 1.685) / 4 = 4.476
+  Std dev σ = √4.476 = 2.116
+
+Step 3: Normalize to mean=0, std=1
+  normalized[i] = (x[i] - μ) / σ
+
+  normalized[0] = (3.02 - 1.668) / 2.116 = 0.639
+  normalized[1] = (-1.49 - 1.668) / 2.116 = -1.492
+  normalized[2] = (3.77 - 1.668) / 2.116 = 0.993
+  normalized[3] = (0.37 - 1.668) / 2.116 = -0.613
+
+  normalized = [0.639, -1.492, 0.993, -0.613]  ← mean ≈ 0, std ≈ 1
+
+Step 4: Learned scale (γ) and shift (β)
+  γ = [1.2, 0.8, 1.5, 0.9]    ← learned per dimension
+  β = [0.1, -0.2, 0.0, 0.3]   ← learned per dimension
+
+  output[i] = γ[i] * normalized[i] + β[i]
+
+  output[0] = 1.2 * 0.639 + 0.1 = 0.867
+  output[1] = 0.8 * (-1.492) - 0.2 = -1.394
+  output[2] = 1.5 * 0.993 + 0.0 = 1.490
+  output[3] = 0.9 * (-0.613) + 0.3 = -0.252
+
+  output = [0.867, -1.394, 1.490, -0.252]
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code</div></div>
+    <pre><code><span class="ck">class</span> LayerNorm(nn.Module):
+    <span class="cc"># PyTorch's nn.LayerNorm handles all steps above</span>
+
+    <span class="ck">def</span> __init__(self, n_embd, eps=1e-5):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(n_embd))   <span class="cc"># γ (scale)</span>
+        self.bias = nn.Parameter(torch.zeros(n_embd))    <span class="cc"># β (shift)</span>
+        self.eps = eps  <span class="cc"># small constant to avoid division by zero</span>
+
+    <span class="ck">def</span> forward(self, x):
+        <span class="cc"># x shape: (B, T, C)</span>
+        <span class="cc"># normalize per token (across C dimension)</span>
+        mean = x.mean(dim=-1, keepdim=True)
+        std = x.std(dim=-1, keepdim=True)
+        normalized = (x - mean) / (std + self.eps)
+        <span class="cc"># apply learned scale and shift</span>
+        output = self.weight * normalized + self.bias
+        <span class="ck">return</span> output
+
+
+<span class="cc"># In Block, LayerNorm is applied BEFORE attention (pre-norm architecture)</span>
+<span class="cc"># This is more stable than post-norm (applying after residual)</span>
+x = x + self.attn(self.ln1(x))  <span class="cc"># ln1 normalizes before feeding to attention</span>
+x = x + self.mlp(self.ln2(x))   <span class="cc"># ln2 normalizes before feeding to FFN</span></code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insights</div></div>
+    <div class="callout c-key">
+      <strong>LayerNorm vs BatchNorm:</strong> BatchNorm (used in CNNs) normalizes across the batch dimension — "compare this pixel's value across all images in the batch." LayerNorm normalizes across the embedding dimension — "compare this token's dimensions to its own average." LayerNorm works identically regardless of batch size or sequence length, making it ideal for text.
+    </div>
+    <div class="callout c-note">
+      <strong>Why γ and β are necessary:</strong> Pure normalization forces all tokens to have mean 0, std 1. But the model might genuinely need mean=2, std=3 in some dimensions to represent certain concepts. γ and β are learned parameters that let the model "undo" normalization where beneficial, while still getting stability during training.
+    </div>
+    <div class="callout c-purple">
+      <strong>Pre-norm vs post-norm:</strong> Nanochat uses pre-norm (apply LayerNorm before attention/FFN) because it is more stable for deep networks. The original Transformer used post-norm (apply after residual), but pre-norm trains faster and requires less learning rate tuning.
+    </div>
+  </div>
+</div>
+
+<div class="section-break"></div>
+
+<h3>Phase 4.3: Feed-Forward Network</h3>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>Self-attention gathers context — mixing signals from many tokens. The feed-forward network processes that context independently per token. Each token runs through a small neural network: expand from 384 → 1536 dims, apply ReLU to select active features, compress back to 384. This is where much of the model's factual knowledge is stored. Research shows removing FFN layers hurts factual recall more than removing attention.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — expand-activate-compress</div></div>
+    <div class="visual">
+      <div class="visual-title">THE FFN PIPELINE</div>
+      <pre style="font-size: 0.85rem; background: #f8f8f8; padding: 1rem; border-radius: 4px">
+Input token: x = [0.61, 0.38, 0.55, 0.32]  (4-dim, normally 384)
+
+Step 1: W1 expands to d_ff = 16  (normally 4×384 = 1536)
+  hidden = W1 @ x + b1
+  hidden_raw = [0.49, 0.84, 0.66, 0.74, ..., -0.23, 0.16, -0.45, ...]  16 dims
+
+  Interpretation (these are learned features):
+    Dim 0:  "Is this geographic?" → 0.49 YES, active
+    Dim 1:  "Is there water involved?" → 0.84 YES, active
+    Dim 10: "Is this financial?" → -0.23 NO, will be zeroed
+    Dim 12: "Is this about money?" → -0.45 NO, will be zeroed
+
+Step 2: ReLU zeroes negatives (feature selection)
+  hidden = ReLU(hidden_raw) = max(0, hidden_raw)
+  hidden = [0.49, 0.84, 0.66, 0.74, ..., 0.0, 0.16, 0.0, ...]
+                                          ↑                ↑ zeroed
+
+  Only positive features survive. This is non-linearity!
+  Without ReLU, W2 @ (W1 @ x) = (W2 @ W1) @ x, collapsing to one matrix.
+
+Step 3: W2 compresses back to C = 4  (normally 1536 → 384)
+  output = W2 @ hidden + b2
+  output = [0.71, 0.29, 0.63, 0.48]
+
+  W2 reads which features fired and combines them.
+  Different features influence the output.
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code</div></div>
+    <pre><code><span class="ck">class</span> MLP(nn.Module):
+    <span class="ck">def</span> __init__(self, config):
+        super().__init__()
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
+        self.gelu = nn.GELU()  <span class="cc"># smoother than ReLU</span>
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+
+    <span class="ck">def</span> forward(self, x):
+        <span class="cc"># x shape: (B, T, C) = (12, 1024, 384)</span>
+        x = self.c_fc(x)      <span class="cc"># (B, T, 384) → (B, T, 1536)</span>
+        x = self.gelu(x)      <span class="cc"># activate</span>
+        x = self.c_proj(x)    <span class="cc"># (B, T, 1536) → (B, T, 384)</span>
+        <span class="ck">return</span> x
+
+
+<span class="cc"># GELU vs ReLU:</span>
+<span class="cc"># ReLU(x) = max(0, x)           hard cutoff at 0</span>
+<span class="cc"># GELU(x) = x * Φ(x)            smooth probabilistic cutoff</span>
+<span class="cc">#         = 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715*x³)))</span>
+<span class="cc">#</span>
+<span class="cc"># GELU is "softer" — useful features with value 0.1 aren't instantly zeroed.</span>
+<span class="cc"># GPT uses GELU, not ReLU.</span></code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key insights</div></div>
+    <div class="callout c-key">
+      <strong>The expansion is where the model reasons.</strong> The 1536-dim space is a "reasoning workspace" where the model detects many features simultaneously. Dimensions might encode "is this a number?", "does this word appear in dialogue?", "is this a programming language?", etc. ReLU gates these features, and W2 combines the active ones. This is far more expressive than a single matrix.
+    </div>
+    <div class="callout c-note">
+      <strong>Why 4× expansion?</strong> The ratio d_ff / d_model = 4 is a design choice. Original Transformer used 4. Some models use 3, some 5. Larger expansion = more capacity but more parameters and compute. Balance between model power and training speed.
+    </div>
+    <div class="callout c-green">
+      <strong>FFN has no cross-token communication.</strong> Token 1's FFN output depends only on token 1's post-attention vector, not on any other token. This is different from attention, which explicitly mixes. Together, attention (communication) + FFN (reasoning) form a complete block.
+    </div>
+  </div>
+</div>
+
+<div class="section-break"></div>
+
+<h3>Phase 4 — Complete Block Code</h3>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">The entire nanochat Block in one view</div></div>
+    <pre><code><span class="ck">class</span> Block(nn.Module):
+    <span class="cc"># One transformer layer: attention + FFN with residuals and layer norms</span>
+
+    <span class="ck">def</span> __init__(self, config):
+        super().__init__()
+        <span class="cc"># Pre-norm: apply LayerNorm before each sub-layer</span>
+        self.ln1 = nn.LayerNorm(config.n_embd)  <span class="cc"># normalize before attention</span>
+        self.attn = CausalSelfAttention(config)
+        self.ln2 = nn.LayerNorm(config.n_embd)  <span class="cc"># normalize before FFN</span>
+        self.mlp = MLP(config)  <span class="cc"># expand-ReLU-compress</span>
+
+    <span class="ck">def</span> forward(self, x):
+        <span class="cc"># Input: x shape (B, T, C) = (12, 1024, 384)</span>
+
+        <span class="cc"># ═══════════════════════════════════════</span>
+        <span class="cc"># Block 1: Self-Attention + Residual</span>
+        <span class="cc"># ═══════════════════════════════════════</span>
+
+        <span class="cc"># Pre-norm: normalize before attention (more stable)</span>
+        normalized = self.ln1(x)  <span class="cc"># (B, T, C)</span>
+
+        <span class="cc"># Multi-head self-attention (gather context)</span>
+        attn_out = self.attn(normalized)  <span class="cc"># (B, T, C)</span>
+
+        <span class="cc"># Residual addition: preserve original info + apply correction</span>
+        x = x + attn_out  <span class="cc"># (B, T, C)</span>
+
+        <span class="cc"># ═══════════════════════════════════════</span>
+        <span class="cc"># Block 2: Feed-Forward + Residual</span>
+        <span class="cc"># ═══════════════════════════════════════</span>
+
+        <span class="cc"># Pre-norm: normalize before FFN</span>
+        normalized = self.ln2(x)  <span class="cc"># (B, T, C)</span>
+
+        <span class="cc"># Feed-forward: per-token reasoning</span>
+        ff_out = self.mlp(normalized)  <span class="cc"># (B, T, C)</span>
+
+        <span class="cc"># Residual addition: preserve + refine</span>
+        x = x + ff_out  <span class="cc"># (B, T, C)</span>
+
+        <span class="cc"># Output: same shape as input, but richer representation</span>
+        <span class="ck">return</span> x</code></pre>
+  </div>
+</div>
+
+<div class="phase-header">
+  <span class="phase-num">5</span>
+  <div>
+    <div class="phase-title">Training: Next-Token Prediction and Optimization</div>
+    <div class="phase-sub">How the model learns to predict the next token, and the training loop that updates all parameters</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it works</div></div>
+    <p>Transformers are trained with a simple objective: given the context so far, predict the next token. This is an unsupervised task — the text itself provides labels. A sentence like "The cat sat on the mat" generates 5 training pairs automatically. With a trillion tokens, the model sees countless diverse patterns and learns rich representations of language.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — auto-generated training data</div></div>
+    <div class="visual">
+      <div class="visual-title">ONE SENTENCE → MULTIPLE TRAINING EXAMPLES</div>
+      <pre style="font-size: 0.85rem; background: #f8f8f8; padding: 1rem; border-radius: 4px">
+Sentence: "The cat sat on the mat"
+Tokens:     0   1   2  3  4   5
+
+Automatically created training pairs:
+
+  Pair 1: Input: [The]                    Target: cat
+  Pair 2: Input: [The cat]                Target: sat
+  Pair 3: Input: [The cat sat]            Target: on
+  Pair 4: Input: [The cat sat on]         Target: the
+  Pair 5: Input: [The cat sat on the]     Target: mat
+
+One sequence generates seq_len training examples!
+
+With B=12 batch size and T=1024 sequence length:
+  Examples per batch = B × T = 12 × 1024 = 12,288
+  Training examples per second = (examples per batch) × (batches per second)
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code — the training loop</div></div>
+    <pre><code><span class="ck">def</span> train_step(model, batch_x, batch_y, optimizer, device):
+    <span class="cc"># batch_x shape: (B, T) token IDs</span>
+    <span class="cc"># batch_y shape: (B, T) next-token labels (shifted x by 1)</span>
+    <span class="cc"># Example: if batch_x = [1, 2, 3, 4], batch_y = [2, 3, 4, 5]</span>
+
+    <span class="cc"># ─── Forward pass ───</span>
+    logits = model(batch_x)  <span class="cc"># shape: (B, T, V) = (12, 1024, 50257)</span>
+
+    <span class="cc"># Reshape for loss computation</span>
+    B, T, V = logits.shape
+    logits_flat = logits.view(B * T, V)  <span class="cc"># (12288, 50257)</span>
+    labels_flat = batch_y.view(B * T)    <span class="cc"># (12288,)</span>
+
+    <span class="cc"># ─── Loss computation ───</span>
+    <span class="cc"># Cross-entropy: -log(P(correct_token))</span>
+    loss = torch.nn.functional.cross_entropy(logits_flat, labels_flat)
+
+    <span class="cc"># ─── Backward pass ───</span>
+    optimizer.zero_grad()      <span class="cc"># clear old gradients</span>
+    loss.backward()            <span class="cc"># compute gradients via backprop</span>
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  <span class="cc"># clip to prevent explosion</span>
+
+    <span class="cc"># ─── Weight update ───</span>
+    optimizer.step()           <span class="cc"># apply gradient updates</span>
+
+    <span class="ck">return</span> loss.item()
+
+
+<span class="ck">def</span> cross_entropy_loss_example():
+    <span class="cc"># Tiny example: vocabulary of 5 tokens, model predicts logits for one token</span>
+
+    vocab_tokens = [<span class="cs">"cat"</span>, <span class="cs">"dog"</span>, <span class="cs">"sat"</span>, <span class="cs">"the"</span>, <span class="cs">"mat"</span>]
+    logits = torch.tensor([0.5, -0.3, 2.1, 0.8, 0.1])  <span class="cc"># model's output</span>
+    true_token_idx = 2  <span class="cc"># correct answer is "sat"</span>
+
+    <span class="cc"># Step 1: softmax to get probabilities</span>
+    probs = torch.softmax(logits, dim=0)
+    <span class="cc"># probs ≈ [0.14, 0.08, 0.48, 0.21, 0.09]  (sum to 1)</span>
+
+    <span class="cc"># Step 2: cross-entropy = -log(probability of true token)</span>
+    loss = -torch.log(probs[true_token_idx])
+    <span class="cc"># loss ≈ -log(0.48) ≈ 0.73</span>
+
+    <span class="cc"># Lower probability → higher loss → stronger gradient signal
+    # If model had assigned prob 0.99 to "sat": loss ≈ -log(0.99) ≈ 0.01 ← small loss, good!</span>
+    <span class="ck">return</span> loss</code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key concepts</div></div>
+    <div class="callout c-key">
+      <strong>Cross-entropy loss measures surprise.</strong> If the model assigns 90% probability to the correct token, loss = -log(0.9) ≈ 0.11. If it assigns 10%, loss = -log(0.1) ≈ 2.3. Larger errors produce larger losses, driving strong gradient updates.
+    </div>
+    <div class="callout c-note">
+      <strong>Causal masking in training.</strong> During training, the model must predict token t using only tokens 0...t-1 (no peeking ahead). At inference time, tokens t+1 onwards don't exist. Training mirrors this constraint to prevent the model from learning to use future information.
+    </div>
+    <div class="callout c-green">
+      <strong>AdamW optimizer.</strong> PyTorch's AdamW combines Adam (adaptive per-parameter learning rates) with decoupled weight decay. It is the standard optimizer for transformers because it converges faster and more reliably than vanilla SGD.
+    </div>
+    <div class="callout c-purple">
+      <strong>Gradient clipping prevents explosion.</strong> Even with residuals and layer norm, gradients can occasionally spike. If the max gradient is, say, 50 but we clip to 1.0, all gradients are scaled down proportionally. This prevents catastrophic updates that destabilize training.
+    </div>
+  </div>
+</div>
+
+<div class="phase-header">
+  <span class="phase-num">6</span>
+  <div>
+    <div class="phase-title">Generation: Autoregressive Sampling and Decoding</div>
+    <div class="phase-sub">How the trained model generates text one token at a time, with temperature and nucleus sampling for control</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it works</div></div>
+    <p>After training, the model can generate new text by running in a loop. Start with a prompt, feed it through 12 transformer layers to get logits for the next token. Sample (or greedily pick) a token from the distribution, append it to the input, and repeat. Each generated token becomes part of the context for predicting the next one. This is called autoregressive generation because each output becomes an input.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — the generation loop</div></div>
+    <div class="visual">
+      <div class="visual-title">AUTOREGRESSIVE GENERATION PIPELINE</div>
+      <pre style="font-size: 0.85rem; background: #f8f8f8; padding: 1rem; border-radius: 4px">
+Iteration 1:
+  Input:  [The, river, bank, was]
+  Forward through 12 layers
+  Last token's output vector → project to 50,257 logits
+  Apply softmax: [prob_the=0.02, prob_flooded=0.31, prob_dried=0.09, ...]
+  Sample: "flooded" (31% probability)
+  Append to input
+
+Iteration 2:
+  Input:  [The, river, bank, was, flooded]  ← "flooded" is new
+  Forward through 12 layers
+  Last token's output vector → logits
+  Softmax: [prob_the=0.01, prob_after=0.24, prob_by=0.15, ...]
+  Sample: "after"
+  Append to input
+
+Iteration 3:
+  Input:  [The, river, bank, was, flooded, after]
+  Forward through 12 layers
+  Sample: "heavy"
+
+Iteration 4:
+  Input:  [..., flooded, after, heavy]
+  Forward
+  Sample: "rainfall"
+
+Iteration 5:
+  Input:  [..., after, heavy, rainfall]
+  Forward
+  Sample: "." (period)
+
+Iteration 6:
+  Input:  [..., rainfall, .]
+  Forward
+  Sample: &lt;END&gt; or continue if desired
+
+Final output: "The river bank was flooded after heavy rainfall."
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Code — generation with temperature and sampling</div></div>
+    <pre><code><span class="ck">def</span> generate(model, prompt_ids, max_new_tokens=100, temperature=0.8,
+              top_p=0.9, device=<span class="cs">"cuda"</span>):
+    <span class="cc"># prompt_ids: list of token IDs, shape (1, prompt_len)</span>
+    <span class="cc"># temperature: controls randomness (0=greedy, 1=normal, 2=wild)</span>
+    <span class="cc"># top_p: nucleus sampling (keep top p probability mass)</span>
+
+    model.eval()
+    generated = prompt_ids.clone()  <span class="cc"># copy to avoid modifying input</span>
+
+    <span class="ck">with</span> torch.no_grad():
+        <span class="ck">for</span> _ <span class="ck">in</span> range(max_new_tokens):
+            <span class="cc"># ─── Forward pass: predict next token ───</span>
+            logits = model(generated[:, -1024:])  <span class="cc"># keep last 1024 tokens (context window)</span>
+            next_logits = logits[0, -1, :]  <span class="cc"># shape: (50257,) — last token's logits</span>
+
+            <span class="cc"># ─── Apply temperature ───</span>
+            <span class="cc"># Higher temperature makes distribution flatter</span>
+            <span class="cc"># Lower temperature makes it sharper (more greedy)</span>
+            next_logits = next_logits / temperature
+
+            <span class="cc"># ─── Apply softmax to get probabilities ───</span>
+            probs = torch.softmax(next_logits, dim=-1)
+
+            <span class="cc"># ─── Nucleus (top-p) sampling ───</span>
+            sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+            cumsum = torch.cumsum(sorted_probs, dim=-1)
+
+            <span class="cc"># Find threshold: keep top tokens until cumsum exceeds top_p</span>
+            mask = cumsum &lt; top_p
+            mask[0] = True  <span class="cc"># always keep at least the most likely token</span>
+
+            <span class="cc"># Zero out probabilities below threshold</span>
+            filtered_probs = sorted_probs.clone()
+            filtered_probs[~mask] = 0
+
+            <span class="cc"># Renormalize after filtering</span>
+            filtered_probs = filtered_probs / filtered_probs.sum()
+
+            <span class="cc"># ─── Sample from filtered distribution ───</span>
+            next_token = torch.multinomial(filtered_probs, num_samples=1)
+            <span class="cc"># Map back to original index</span>
+            next_token = sorted_indices[next_token]
+
+            <span class="cc"># ─── Append and continue ───</span>
+            generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)
+
+            <span class="cc"># Early stop if END token generated</span>
+            <span class="ck">if</span> next_token.item() == END_TOKEN_ID:
+                <span class="ck">break</span>
+
+    <span class="ck">return</span> generated
+
+
+<span class="cc"># ─── Decoding strategies ───</span>
+
+<span class="cc"># Greedy: always pick highest probability</span>
+<span class="cc"># next_token = torch.argmax(probs)</span>
+<span class="cc"># Fast, deterministic, often repetitive</span>
+
+<span class="cc"># Top-k: sample from top k tokens</span>
+<span class="cc"># sorted_probs, sorted_indices = torch.topk(probs, k=50)</span>
+<span class="cc"># filtered_probs = sorted_probs / sorted_probs.sum()</span>
+<span class="cc"># next_token = sorted_indices[torch.multinomial(filtered_probs, 1)]</span>
+
+<span class="cc"># Top-p (nucleus): sample from tokens whose cumsum prob < p</span>
+<span class="cc"># (implemented above)</span>
+<span class="cc"># Adaptive: keeps more tokens when distribution is uncertain,</span>
+<span class="cc"># fewer when it is confident. Best for quality.</span></code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Decoding strategies</div></div>
+    <div class="callout c-note">
+      <strong>Temperature:</strong> Dividing logits by T before softmax changes the distribution. T=1 is normal. T=0.1 makes it sharper (greedy-like, deterministic). T=2 makes it flatter (wild, unpredictable). Most use 0.7–0.9 for a balance.
+    </div>
+    <div class="callout c-green">
+      <strong>Top-p (nucleus sampling):</strong> Instead of sampling from all 50,257 tokens, filter to keep only the top tokens until cumulative probability reaches p (e.g. 0.9). This removes the "long tail" of unlikely tokens that add noise while preserving the model's confident choices.
+    </div>
+    <div class="callout c-purple">
+      <strong>KV cache optimization:</strong> In production, you don't recompute all Q, K, V projections for old tokens every iteration. You cache K and V from previous steps and only compute Q for the new token. This speeds up generation 10–100× and is essential for chat interfaces.
+    </div>
+  </div>
+</div>
+
+<div class="section-break"></div>
+
+<div class="phase-header">
+  <span class="phase-num">7</span>
+  <div>
+    <div class="phase-title">Encoder-Decoder Architecture for Translation</div>
+    <div class="phase-sub">When and why to use bidirectional encoding and cross-attention for tasks like machine translation</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why it exists</div></div>
+    <p>Some tasks require fully understanding the source before generating the target (e.g., machine translation). Encoder-decoder architectures separate reading from writing: the encoder reads the entire source with no causal mask (seeing both past and future), producing rich source representations. The decoder then generates the target one token at a time using cross-attention to look up information in the encoder output. GPT and Claude are decoder-only and do not use cross-attention; they are optimized for next-token prediction in a single language.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">Visual — encoder-decoder flow</div></div>
+    <div class="visual">
+      <div class="visual-title">ENCODER-DECODER PIPELINE</div>
+      <pre style="font-size: 0.85rem; background: #f8f8f8; padding: 1rem; border-radius: 4px">
+Source (English): "The river bank was flooded"
+Target (French):  "La berge de la rivière était inondée"
+
+╔═══════════════════════════════════════════════════════════╗
+║ ENCODER — Reads source, NO causal mask                    ║
+║                                                           ║
+║ Every word sees every word bidirectionally.              ║
+║ "bank" attends to "flooded" (future in English order)    ║
+║ "flooded" attends to "The" (past)                        ║
+║ Result: rich, fully-contextualized source representations ║
+║                                                           ║
+║ Source vectors (5 tokens × 384 dims):                    ║
+║ V_The ≈ [0.52, -0.31, 0.88, ...]  disambiguated         ║
+║ V_river ≈ [0.71, 0.44, 0.29, ...]  in context           ║
+║ V_bank ≈ [0.88, 0.15, 0.62, ...]   ← GEOGRAPHIC         ║
+║ V_was ≈ [0.42, 0.87, 0.11, ...]                         ║
+║ V_flooded ≈ [0.95, 0.21, 0.77, ...]  event, recent      ║
+╚═══════════════════════════════════════════════════════════╝
+                         ↓ (K, V passed to decoder)
+
+╔═══════════════════════════════════════════════════════════╗
+║ DECODER — Generates target using encoder K, V            ║
+║                                                           ║
+║ Iteration 1:                                             ║
+║   Generated so far: [START]                              ║
+║   Self-attn: START attends only to itself                ║
+║   Cross-attn: Q_START matches against encoder Keys       ║
+║              → finds high match to "The" (article)       ║
+║              → mixes V_The: "feminine article for noun" ║
+║   Output: "La"                                           ║
+║                                                           ║
+║ Iteration 2:                                             ║
+║   Generated so far: [START, La]                          ║
+║   Self-attn: La attends to [START, La]                   ║
+║   Cross-attn: Q_La matches against encoder Keys          ║
+║              → high match to "bank", "river" (noun+adj)  ║
+║              → mixes V_bank + V_river context            ║
+║   Output: "berge"  ← French for "bank" (geographic)      ║
+║                                                           ║
+║ Iteration 3:                                             ║
+║   Generated so far: [START, La, berge]                   ║
+║   Cross-attn: Q_berge matches encoder                    ║
+║              → middle output, preposition signal         ║
+║   Output: "de"                                           ║
+║                                                           ║
+║ ... (continues until END)                                ║
+║                                                           ║
+║ Final: "La berge de la rivière était inondée"           ║
+╚═══════════════════════════════════════════════════════════╝
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{}</div><div class="layer-label">Cross-attention mechanism</div></div>
+    <pre><code><span class="cc"># In a decoder layer, three separate attention mechanisms:</span>
+
+<span class="ck">def</span> decoder_layer_forward(x_decoder, encoder_output):
+    <span class="cc"># x_decoder shape: (B, T_tgt, C)  — decoder states so far</span>
+    <span class="cc"># encoder_output shape: (B, T_src, C)  — frozen encoder output</span>
+
+    <span class="cc"># ─── 1. Self-attention (causal) ───</span>
+    <span class="cc"># Q, K, V all come from decoder</span>
+    <span class="cc"># Causal mask: token i only attends to tokens 0..i (not future)</span>
+    self_attn_out = causal_self_attention(x_decoder)  <span class="cc"># (B, T_tgt, C)</span>
+    x_decoder = x_decoder + self_attn_out  <span class="cc"># residual</span>
+    x_decoder = layer_norm(x_decoder)
+
+    <span class="cc"># ─── 2. Cross-attention (decoder → encoder) ───</span>
+    <span class="cc"># Q comes from decoder (what am I generating?)</span>
+    <span class="cc"># K, V come from encoder (where should I look in source?)</span>
+    <span class="cc"># NO causal mask: all decoder positions can attend to all source positions</span>
+    Q = W_Q @ x_decoder  <span class="cc"># (B, T_tgt, C)</span>
+    K = W_K @ encoder_output  <span class="cc"># (B, T_src, C)</span>
+    V = W_V @ encoder_output  <span class="cc"># (B, T_src, C)</span>
+
+    scores = (Q @ K.transpose(-2, -1)) / math.sqrt(d_k)  <span class="cc"># (B, T_tgt, T_src)</span>
+    <span class="cc"># No masking! Decoder can look at all source tokens.</span>
+    weights = torch.softmax(scores, dim=-1)  <span class="cc"># (B, T_tgt, T_src)</span>
+    cross_attn_out = weights @ V  <span class="cc"># (B, T_tgt, C)</span>
+
+    x_decoder = x_decoder + cross_attn_out  <span class="cc"># residual</span>
+    x_decoder = layer_norm(x_decoder)
+
+    <span class="cc"># ─── 3. Feed-forward (independent per token) ───</span>
+    ff_out = mlp(x_decoder)  <span class="cc"># (B, T_tgt, C)</span>
+    x_decoder = x_decoder + ff_out  <span class="cc"># residual</span>
+    x_decoder = layer_norm(x_decoder)
+
+    <span class="ck">return</span> x_decoder
+
+
+<span class="cc"># Key difference from GPT (decoder-only):</span>
+<span class="cc"># GPT: Self-attention only (Q, K, V from same source, causal mask)</span>
+<span class="cc"># Encoder-Decoder: Three attention sub-layers, with cross-attention</span></code></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Key distinctions</div></div>
+    <div class="callout c-note">
+      <strong>Decoder-only (GPT, Claude, LLaMA):</strong> All attention is causal self-attention within the same token stream. The model reads and writes in the same space. Optimized for next-token prediction in a single context. Simpler architecture, easier to scale.
+    </div>
+    <div class="callout c-note">
+      <strong>Encoder-Decoder (original Transformer, T5, MarianMT):</strong> Encoder reads full source bidirectionally, decoder generates output with causal self-attention plus cross-attention into encoder. Better for tasks where you must fully understand input before output (translation, summarization). More complex, but can be more accurate for paired input-output tasks.
+    </div>
+    <div class="callout c-green">
+      <strong>Cross-attention is the bridge.</strong> The decoder's Query asks "what do I need?", the encoder's Keys and Values answer "here is what exists in the source." This explicit lookup mechanism makes encoder-decoder models interpretable — you can see which source tokens the decoder attended to.
+    </div>
+  </div>
+</div>
+
+<div class="phase-header">
+  <span class="phase-num">Epilogue</span>
+  <div>
+    <div class="phase-title">The Conceptual Lineage of Modern NLP</div>
+    <div class="phase-sub">From embeddings to attention — a 15-year journey of iterative refinement</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">◆</div><div class="layer-label">The journey</div></div>
+    <div class="visual">
+      <div class="visual-title">THE EVOLUTION OF CONTEXT</div>
+      <pre style="font-size: 0.85rem; background: #f8f8f8; padding: 1rem; border-radius: 4px">
+2013 — WORD2VEC
+═════════════════════════════════════════════════════════════════════
+  Problem: How do we represent meaning as numbers?
+  Solution: Train a shallow network to predict context words.
+  Result:  Embeddings. "king - man + woman ≈ queen"
+
+  Key insight: A word's meaning is captured in the geometry of its
+               embedding vector. Similar words cluster together.
+               But the embedding is STATIC — "bank" always gets
+               the same vector regardless of sentence context.
+
+
+2014-2017 — RECURRENT NEURAL NETWORKS (RNN, LSTM)
+═════════════════════════════════════════════════════════════════════
+  Problem: How do we process sequences and maintain context?
+  Solution: Maintain a hidden state that updates as you read each word.
+  Result:  Contextual representations! "bank" in "river bank" gets
+           a different hidden state than in "deposit bank".
+
+  Key insight: A hidden state vector accumulates information over time.
+               But sequential processing is slow, and gradients vanish
+               over long distances (RNN) or need special plumbing (LSTM).
+               The cell state is like a protected highway that carries
+               important facts forward unchanged.
+
+
+2017 — TRANSFORMER WITH SELF-ATTENTION
+═════════════════════════════════════════════════════════════════════
+  Problem: RNNs are sequential (slow), and long-range dependencies vanish.
+  Solution: Let every token directly attend to every other token in
+             parallel. No sequential bottleneck!
+  Result:  "bank" sees "flooded" immediately, not through 50 intermediate
+           states. All tokens processed simultaneously. 10-100× speedup.
+
+  Key insight: Context is not a single bottleneck vector (hidden state).
+               Context is a rich, dynamic mixture of all other tokens'
+               representations, weighted by learned relevance (attention).
+
+               Attention is the same projection idea as Word2Vec (W1, W2)
+               but applied THREE WAYS simultaneously:
+               - W_Q:  "What am I looking for?" (like W1)
+               - W_K:  "What do I offer?" (like W2)
+               - W_V:  "Here is my content!" (NEW — not in Word2Vec)
+
+
+UNIFYING INSIGHT: CONTEXTUAL AGGREGATION
+═════════════════════════════════════════════════════════════════════
+
+All architectures solve one problem:
+  "Given a sequence of words, build a representation of meaning
+   that lets you predict what comes next."
+
+Each architecture's solution:
+  Word2Vec:   Aggregate meaning across the training corpus
+  RNN:        Aggregate meaning sequentially (past tokens only)
+  LSTM:       Aggregate meaning sequentially with a protected highway
+  Transformer: Aggregate meaning in parallel from ANY token to ANY token,
+               weighted by learned relevance
+
+The progression is about REMOVING BOTTLENECKS:
+  Word2Vec:    One bottleneck (embedding)
+  RNN:         One bottleneck (hidden state) per time step (slow!)
+  LSTM:        One bottleneck per time step + cell state bypass
+  Transformer: NO bottleneck — every token talks directly to every token
+      </pre>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><div class="layer-label">Why the Transformer won</div></div>
+    <p>Transformers unified the best ideas from their predecessors and parallelized everything. Word2Vec embeddings are still the entry point (wte). RNN's context accumulation is replaced by attention, which is more expressive and infinitely parallelizable. LSTM's cell state intuition becomes residual connections — a protected lane that carries information through depth rather than time. The result: a model that trains 100× faster than RNNs on the same data, learns longer-range dependencies, and scales to billions of parameters with predictable improvements.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Three directions forward</div></div>
+    <div class="callout c-note">
+      <strong>Scaling.</strong> Larger models (more parameters), more data (longer training), larger context windows. The Transformer scales gracefully — double the size, get predictable improvements in capability. GPT-2 (117M) → GPT-3 (175B) → future models (1T+). Chinchilla scaling laws suggest optimal models have roughly 20 tokens of training data per parameter.
+    </div>
+    <div class="callout c-note">
+      <strong>Long context.</strong> Current Transformers have context windows of 1K-32K tokens (nanochat, GPT-3.5). New architectures (sparse attention, linear attention, RNNs with attention) are pushing toward 1M+ tokens. This unlocks whole-document reasoning, retrieval-augmented generation, and multi-turn conversations.
+    </div>
+    <div class="callout c-note">
+      <strong>Efficiency.</strong> Full attention is O(T²) — expensive for long sequences. Alternatives: Linformers (linear complexity), Performers (kernel tricks), or returning to RNN-like recurrence for long context. Research is exploring how to get Transformer capability with RNN efficiency.
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><div class="layer-label">Your foundation</div></div>
+    <div class="callout c-green">
+      <strong>You now understand the full forward and backward pass.</strong> You know how tokens are embedded, how positions are encoded, how attention gathers context, how residuals and norms stabilize depth, how FFN reasons per-token, how the model is trained with cross-entropy, and how it generates one token at a time. You can read nanochat's code and understand every line. You know the scaling laws that govern modern LLMs and the conceptual thread that connects embeddings to transformers to future architectures. This is the mental model that practitioners use to build, scale, and debug language models.
+    </div>
+  </div>
 </div>
 
 <div class="section-break"></div>
@@ -1528,9 +4017,9 @@ optimizer = torch.optim.AdamW([                             <span class="ptag">P
 <div class="section-break"></div>
 
 <div style="text-align:center;padding:28px;background:var(--paper2);border:.5px solid var(--rule);border-radius:10px">
-  <div style="font-family:var(--serif);font-size:1.3rem;font-weight:700;margin-bottom:6px">nanochat Learning Journal</div>
-  <div style="font-family:var(--mono);font-size:.72rem;color:var(--ink4)">Phase 1 — Tokenisation &nbsp;·&nbsp; Phase 2 — Embeddings &nbsp;·&nbsp; Phase 3.1 — Q, K, V Projections</div>
-  <div style="font-size:.72rem;color:var(--ink4);margin-top:8px;font-style:italic">Phases 3.2 → 5 coming: attention scores · causal mask · multi-head · transformer block · training · generation</div>
+  <div style="font-family:var(--serif);font-size:1.3rem;font-weight:700;margin-bottom:6px">Teach You an LLM</div>
+  <div style="font-family:var(--mono);font-size:.72rem;color:var(--ink4)">Part 0 · Foundations &nbsp;·&nbsp; Part 0.5 · Lineage &nbsp;·&nbsp; Phase 1 · Tokenisation &nbsp;·&nbsp; Phase 2 · Embeddings &nbsp;·&nbsp; Phase 3.1–3.4 · Attention &nbsp;·&nbsp; Phase 4 · Block &nbsp;·&nbsp; Phase 5 · Training &nbsp;·&nbsp; Phase 6 · Generation &nbsp;·&nbsp; Phase 7 · Encoder-decoder</div>
+  <div style="font-size:.72rem;color:var(--ink4);margin-top:8px;font-style:italic">Numbers → vectors → attention → transformer → generation. The full mental model, end to end.</div>
 </div>
 
 </body>

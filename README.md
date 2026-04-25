@@ -1,19 +1,27 @@
 # learn-you-an-llm
 
-A single-page illustrated tutorial for understanding how LLMs work, built around Karpathy's [nanochat](https://github.com/karpathy/nanochat) codebase.
+Learning materials for understanding how LLMs work, built around Karpathy's [nanochat](https://github.com/karpathy/nanochat) codebase.
 
-## What it covers
+Every concept is annotated: `[PT]` = PyTorch built-in, `[NC]` = nanochat custom. Tensor shape traces follow dimensions through each operation.
 
-The tutorial walks through the core concepts of building a language model from scratch:
+## Tutorial
 
-1. **Tokenization** — BPE, tiktoken, character-level tokenizers
-2. **Embeddings** — token embeddings (`wte`), positional encoding (`wpe`), `nn.Embedding`
-3. **Transformer internals** — Q/K/V projections, multi-head attention, the complete dimension trace from input to output
-4. **Training infrastructure** — LayerNorm, AdamW, the training loop
-
-Every concept is annotated with what's PyTorch built-in vs. what's nanochat-custom, and includes tensor shape traces so you can follow the dimensions through each operation.
-
-## Files
-
-- `llm_tutorial.html` — the tutorial (open in a browser)
+- `llm_tutorial.html` — illustrated single-page tutorial (open in a browser)
 - `llm_tutorial.pdf` — PDF version
+
+## Learning journal
+
+The `journal/` directory breaks down the full nanochat build into 8 sections, from tokenisation to training:
+
+| # | File | What it covers |
+|---|------|---------------|
+| 0 | [Architecture Overview](journal/00_architecture_overview.md) | Full pipeline shape trace, `wte`/`lm_head`/`n_head`, logits/softmax/cross-entropy, PyTorch quick reference |
+| 1 | [Tokenisation](journal/01_tokenisation.md) | BPE algorithm, character-level tokeniser, tiktoken, data preparation (`prepare.py`, `get_batch`) |
+| 2 | [Embeddings](journal/02_embeddings.md) | `idx`, `nn.Embedding`, positional encoding, broadcasting, dropout, LayerNorm, AdamW, regularisation |
+| 3 | [Q/K/V Projections](journal/03_qkv_projections.md) | Why three projections, fused `c_attn`, `.view()`/`.transpose()`, attention score computation, dimension trace |
+| 4 | [Scaled Attention](journal/04_scaled_attention.md) | Scale by 1/sqrt(d_h), causal mask, softmax, weighted sum of V, head reassembly |
+| 5 | [Residuals, Multi-Head & MLP](journal/05_residuals_multihead_mlp.md) | Vanishing gradients, residual connections, MLP/FFN, `c_proj` synthesis, complete `CausalSelfAttention` |
+| 6 | [Transformer Block](journal/06_transformer_block.md) | Residual stream, `Block` class, `GPT` model, `forward()`, `lm_head`, end-to-end shape trace |
+| 7 | [Training & Generation](journal/07_training_and_generation.md) | Autoregressive generation, temperature, top-k, training loop, LR scheduling, checkpointing |
+
+The original monolithic journal is in `nanochat_learning_journal.md`.
