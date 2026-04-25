@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teach-You-An-LLM — nanochat Learning Tutorial</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,wght@0,300;0,400;0,600;0,700;1,300&family=DM+Sans:wght@300;400;500;600&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#1a1917;--ink2:#3a3830;--ink3:#6a6860;--ink4:#9a9890;
+  --paper:#faf8f5;--paper2:#f2efe9;--paper3:#e8e4dc;--rule:#d8d3c8;
+  --accent:#c8440a;--blue:#185fa5;--green:#1d6b45;--purple:#6b3fa0;--amber:#9a6800;
+  --pt-bg:#e6f1fb;--pt-fg:#0c447c;--pt-bd:#b8d4ef;
+  --nc-bg:#e1f5ee;--nc-fg:#085041;--nc-bd:#9fd8c4;
+  --q-bg:#f0effe;--q-fg:#3c3489;--q-bd:#b0a8e8;
+  --k-bg:#e8f7f1;--k-fg:#085041;--k-bd:#7ecdb0;
+  --v-bg:#fef5e7;--v-fg:#633806;--v-bd:#e8b870;
+  --mono:'JetBrains Mono',monospace;
+  --serif:'Fraunces',Georgia,serif;
+  --sans:'DM Sans',system-ui,sans-serif;
+}
+html{font-size:14px}
+body{font-family:var(--sans);background:var(--paper);color:var(--ink);line-height:1.7;max-width:980px;margin:0 auto;padding:48px 40px}
+
+/* ── TYPOGRAPHY ── */
+h1{font-family:var(--serif);font-size:2.6rem;font-weight:700;letter-spacing:-.03em;line-height:1.1}
+h2{font-family:var(--serif);font-size:1.4rem;font-weight:600;letter-spacing:-.01em;margin:2.5rem 0 .5rem;color:var(--ink);border-bottom:1.5px solid var(--rule);padding-bottom:5px}
+h3{font-family:var(--serif);font-size:1.1rem;font-weight:600;margin:1.8rem 0 .4rem;color:var(--ink)}
+h4{font-family:var(--sans);font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--ink3);margin:1.2rem 0 .35rem}
+p{margin-bottom:.75rem;color:var(--ink2);font-size:.92rem}
+strong{color:var(--ink);font-weight:600}
+em{font-style:italic;color:var(--ink3)}
+a{color:var(--blue);text-decoration:none}
+
+/* ── COVER ── */
+.cover{border:2px solid var(--ink);padding:52px 56px;margin-bottom:3rem;position:relative;background:var(--paper)}
+.cover::before{content:'';position:absolute;inset:6px;border:.5px solid var(--rule);pointer-events:none}
+.cover-tag{font-family:var(--mono);font-size:.65rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+.cover-title{font-family:var(--serif);font-size:3.2rem;font-weight:700;letter-spacing:-.03em;line-height:1.05;margin-bottom:10px}
+.cover-sub{font-size:1.05rem;color:var(--ink3);font-weight:300;margin-bottom:26px;font-style:italic}
+.cover-badges{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.badge{font-family:var(--mono);font-size:.68rem;padding:4px 11px;border-radius:3px;letter-spacing:.04em}
+.badge-pt{background:var(--pt-bg);color:var(--pt-fg);border:.5px solid var(--pt-bd)}
+.badge-nc{background:var(--nc-bg);color:var(--nc-fg);border:.5px solid var(--nc-bd)}
+.cover-numbers{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:20px;padding-top:20px;border-top:.5px solid var(--rule)}
+.cn{text-align:center;padding:8px}
+.cn-val{font-family:var(--mono);font-size:1.2rem;font-weight:700;color:var(--ink)}
+.cn-label{font-size:.68rem;color:var(--ink4);margin-top:2px;text-transform:uppercase;letter-spacing:.07em}
+
+/* ── PHASE HEADER ── */
+.phase-header{display:flex;align-items:baseline;gap:14px;margin:3.5rem 0 1.5rem;padding-bottom:10px;border-bottom:2px solid var(--ink)}
+.phase-num{font-family:var(--mono);font-size:.65rem;font-weight:700;background:var(--ink);color:var(--paper);padding:5px 11px;border-radius:3px;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.phase-title{font-family:var(--serif);font-size:1.7rem;font-weight:700;letter-spacing:-.02em}
+.phase-sub{font-size:.82rem;color:var(--ink4);font-style:italic}
+
+/* ── CONCEPT BLOCKS (the 4-layer pattern) ── */
+.concept{margin:1.6rem 0}
+.concept-layer{margin:.6rem 0}
+.layer-header{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.layer-icon{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.li-why{background:var(--pt-bg);color:var(--pt-fg)}
+.li-visual{background:var(--q-bg);color:var(--q-fg)}
+.li-code{background:var(--nc-bg);color:var(--nc-fg)}
+.li-key{background:#fef9e7;color:var(--amber)}
+.layer-label{font-size:.68rem;font-weight:600;letter-spacing:.11em;text-transform:uppercase;color:var(--ink4)}
+
+/* ── VISUAL PANELS ── */
+.visual{background:var(--paper2);border:.5px solid var(--rule);border-radius:8px;padding:14px 16px;margin:.6rem 0}
+.visual-title{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--ink4);margin-bottom:10px}
+
+/* ── CODE BLOCKS ── */
+pre{font-family:var(--mono);font-size:.72rem;line-height:1.72;background:#1e1c18;color:#d4cfc4;border-radius:7px;padding:14px 16px;overflow-x:auto;margin:.6rem 0;white-space:pre}
+code{font-family:var(--mono);font-size:.78rem;background:var(--paper2);border:.5px solid var(--rule);padding:1px 5px;border-radius:3px}
+.ck{color:#b09ae0}.cs{color:#7ecdb0}.cc{color:#6a6860}.cn2{color:#e8b870}
+.ptag{background:#1a3a5c;color:#7ec8e3;font-size:.6rem;padding:1px 5px;border-radius:2px;font-family:var(--sans);font-weight:600}
+.nctag{background:#1a3a28;color:#7ecdb0;font-size:.6rem;padding:1px 5px;border-radius:2px;font-family:var(--sans);font-weight:600}
+
+/* inline badges (light backgrounds) */
+.pt{background:var(--pt-bg);color:var(--pt-fg);font-size:.62rem;font-weight:600;padding:1px 5px;border-radius:3px;font-family:var(--sans);white-space:nowrap}
+.nc{background:var(--nc-bg);color:var(--nc-fg);font-size:.62rem;font-weight:600;padding:1px 5px;border-radius:3px;font-family:var(--sans);white-space:nowrap}
+
+/* ── CALLOUTS ── */
+.callout{border-radius:6px;padding:11px 15px;margin:.6rem 0;font-size:.84rem;line-height:1.62}
+.callout strong{display:block;margin-bottom:3px;font-size:.82rem}
+.c-key{background:#fef9e7;border:.5px solid #e8c84a;border-left:3px solid #c8a800}
+.c-note{background:var(--pt-bg);border:.5px solid var(--pt-bd);border-left:3px solid var(--blue)}
+.c-warn{background:#fef0ec;border:.5px solid #f0b8a0;border-left:3px solid var(--accent)}
+.c-green{background:var(--nc-bg);border:.5px solid var(--nc-bd);border-left:3px solid var(--green)}
+.c-purple{background:var(--q-bg);border:.5px solid var(--q-bd);border-left:3px solid var(--purple)}
+
+/* ── TABLES ── */
+table{width:100%;border-collapse:collapse;font-size:.8rem;margin:.6rem 0}
+th{text-align:left;font-weight:600;font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);padding:6px 10px;border-bottom:1.5px solid var(--rule);background:var(--paper2)}
+td{padding:7px 10px;border-bottom:.5px solid var(--rule);vertical-align:top;color:var(--ink2)}
+tr:nth-child(even) td{background:rgba(0,0,0,.02)}
+tr:last-child td{border-bottom:none}
+.td-mono{font-family:var(--mono);font-size:.73rem;color:var(--ink)}
+.row-win td{background:var(--nc-bg)!important;color:var(--nc-fg);font-weight:500}
+.row-hi td{background:var(--pt-bg)!important}
+
+/* ── DIMENSION TRACE TABLE ── */
+.dim-trace{border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:.8rem 0;font-size:.75rem}
+.dim-head{display:grid;grid-template-columns:60px 200px 200px 1fr;background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:.63rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.dim-row{display:grid;grid-template-columns:60px 200px 200px 1fr;border-top:.5px solid var(--rule)}
+.dim-row:nth-child(even){background:rgba(0,0,0,.02)}
+.dim-cell{padding:7px 11px;border-right:.5px solid var(--rule);display:flex;align-items:center}
+.dim-cell:last-child{border-right:none}
+.dim-step{font-family:var(--mono);font-weight:700;font-size:.8rem;color:var(--ink)}
+.dim-op{font-family:var(--mono);font-size:.72rem;color:var(--ink2)}
+.dim-shape{font-family:var(--mono);font-weight:600;font-size:.8rem;color:var(--ink)}
+.dim-note{font-size:.72rem;color:var(--ink3)}
+.dim-new{color:var(--accent);font-weight:700}
+.dr-p2{background:#e8f4fc!important}
+.dr-p3{background:#f0effe!important}
+.dr-final{background:#fef0ec!important}
+.dr-final .dim-shape{color:var(--accent)}
+
+/* ── GRID LAYOUTS ── */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:.6rem 0}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:.6rem 0}
+
+/* ── CARDS ── */
+.card{border:.5px solid var(--rule);border-radius:8px;padding:13px 15px;background:var(--paper)}
+.card-q{background:var(--q-bg);border-color:var(--q-bd);border-top:2.5px solid var(--purple)}
+.card-k{background:var(--k-bg);border-color:var(--k-bd);border-top:2.5px solid var(--green)}
+.card-v{background:var(--v-bg);border-color:var(--v-bd);border-top:2.5px solid var(--amber)}
+.card-blue{background:var(--pt-bg);border-color:var(--pt-bd);border-top:2.5px solid var(--blue)}
+.card-red{background:#fef0ec;border-color:#f0b8a0;border-top:2.5px solid var(--accent)}
+.card-title{font-weight:600;font-size:.88rem;margin-bottom:5px}
+.card-q .card-title{color:var(--q-fg)}
+.card-k .card-title{color:var(--k-fg)}
+.card-v .card-title{color:var(--v-fg)}
+.card-blue .card-title{color:var(--pt-fg)}
+.card-red .card-title{color:var(--accent)}
+.card-body{font-size:.78rem;color:var(--ink2);line-height:1.55}
+
+/* ── MERGE STEP VISUALS ── */
+.merge-step{display:flex;align-items:center;gap:8px;margin:.35rem 0;flex-wrap:wrap}
+.ms-num{font-family:var(--mono);font-size:.65rem;font-weight:700;background:var(--ink);color:var(--paper);padding:2px 8px;border-radius:3px;white-space:nowrap}
+.ms-before{font-family:var(--mono);font-size:.78rem;color:var(--ink3)}
+.ms-arr{color:var(--accent);font-weight:700}
+.ms-new{background:var(--q-bg);border:.5px solid var(--q-bd);color:var(--q-fg);font-family:var(--mono);font-size:.78rem;padding:1px 7px;border-radius:3px;font-weight:600}
+.vocab-row{display:flex;flex-wrap:wrap;gap:3px;margin:.3rem 0}
+.vtok{font-family:var(--mono);font-size:.7rem;padding:2px 6px;border-radius:3px;border:.5px solid var(--rule);background:var(--paper);color:var(--ink2)}
+.vtok-new{background:var(--q-bg);border-color:var(--q-bd);color:var(--q-fg);font-weight:600}
+
+/* ── TOKEN PILLS ── */
+.tok{display:inline-block;font-family:var(--mono);font-size:.72rem;padding:2px 7px;border-radius:4px;border:.5px solid var(--rule);background:var(--paper2);margin:2px}
+.tok-p{background:var(--q-bg);border-color:var(--q-bd);color:var(--q-fg)}
+.tok-g{background:var(--k-bg);border-color:var(--k-bd);color:var(--k-fg)}
+.tok-a{background:var(--v-bg);border-color:var(--v-bd);color:var(--v-fg)}
+.tok-b{background:var(--pt-bg);border-color:var(--pt-bd);color:var(--pt-fg)}
+.tok-r{background:#fef0ec;border-color:#f0b8a0;color:var(--accent)}
+
+/* ── DIVIDERS ── */
+hr{border:none;border-top:.5px solid var(--rule);margin:2rem 0}
+.section-break{border-top:2px solid var(--rule);margin:3rem 0}
+
+/* ── ARCHITECTURE DIAGRAM ── */
+.arch-diagram{margin:1.2rem 0 1.6rem;padding:0}
+.arch-diagram svg{max-width:100%;height:auto;display:block}
+
+/* ── SHAPE FLOW ── */
+.shape-flow{font-family:var(--mono);font-size:.75rem;line-height:2.1;background:var(--paper2);border:.5px solid var(--rule);border-radius:7px;padding:12px 16px;margin:.6rem 0}
+.sf-arrow{color:var(--ink4)}
+.sf-shape{font-weight:600;color:var(--ink)}
+.sf-note{color:var(--ink4)}
+.sf-new{color:var(--accent);font-weight:700}
+
+/* ── PRINT ── */
+@media print{
+  body{max-width:100%;padding:16px 22px;font-size:11.5px}
+  h1{font-size:2rem}h2{font-size:1.2rem}h3{font-size:1rem}
+  .cover{padding:28px 32px}.cover-title{font-size:2.4rem}
+  pre{font-size:.63rem;background:#f5f2ec!important;color:#1a1917!important;border:1px solid #c8c4bc}
+  .ptag{background:#dbeafe!important;color:#1e40af!important}
+  .nctag{background:#dcfce7!important;color:#166534!important}
+  @page{margin:1.4cm 1.6cm;size:A4}
+  .no-break{page-break-inside:avoid}
+  h2,h3,.phase-header{page-break-after:avoid}
+  pre,table,.callout,.dim-trace,.visual{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════════
+     COVER
+══════════════════════════════════════════════════════════════ -->
+<div class="cover no-break">
+  <div class="cover-tag">LLM Build Week · Personal Reference</div>
+  <div class="cover-title">nanochat<br>Learning Journal</div>
+  <div class="cover-sub">Building a language model from scratch — concepts, code, and intuition</div>
+  <div class="cover-badges">
+    <span class="badge badge-pt">[PT] PyTorch built-in — comes from the library, just use it</span>
+    <span class="badge badge-nc">[NC] nanochat custom — Karpathy wrote it, understand every line</span>
+  </div>
+  <div class="cover-numbers">
+    <div class="cn"><div class="cn-val">12</div><div class="cn-label">B · batch size</div></div>
+    <div class="cn"><div class="cn-val">1024</div><div class="cn-label">T · context length</div></div>
+    <div class="cn"><div class="cn-val">384</div><div class="cn-label">C · n_embd</div></div>
+    <div class="cn"><div class="cn-val">50,257</div><div class="cn-label">V · vocab size</div></div>
+    <div class="cn"><div class="cn-val">6</div><div class="cn-label">N · layers</div></div>
+    <div class="cn"><div class="cn-val">6</div><div class="cn-label">n_head · heads</div></div>
+    <div class="cn"><div class="cn-val">64</div><div class="cn-label">d_h · head dim</div></div>
+    <div class="cn"><div class="cn-val">19.3M</div><div class="cn-label">wte params</div></div>
+  </div>
+</div>
+
+<div class="callout c-note no-break" style="margin-top:1.2rem">
+  <strong>How to read this document</strong>
+  Each phase maps to the nanochat build roadmap. Every code block is annotated:
+  <span class="pt">PT</span> = PyTorch built-in — comes from the library, just use it.
+  <span class="nc">NC</span> = nanochat custom — Karpathy wrote it, understand every line.<br>
+  Shape traces show tensor dimensions at each step — <code>(B, T) → (B, T, C)</code> — where
+  <strong>B</strong> = batch size (12), <strong>T</strong> = sequence length (1024),
+  <strong>C</strong> = channels / embedding dim (384), <strong>V</strong> = vocab size (50,257).
+</div>
+
+<nav class="callout c-purple no-break" style="margin-top:.8rem">
+  <strong>Jump to a section</strong>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;font-size:.82rem;margin-top:4px">
+    <div>· Architecture Overview — the full pipeline</div>
+    <div>· Key Terms — wte · lm_head · n_head</div>
+    <div>· Output — logits, softmax, cross-entropy</div>
+    <div>· Phase 1 — Tokenisation (BPE · tiktoken · char)</div>
+    <div>· Phase 2 — Embeddings &amp; the block</div>
+    <div>· Phase 3.1 — Q/K/V Projections <em>(current)</em></div>
+    <div>· ★ The Complete Dimension Trace</div>
+    <div>· PyTorch Built-ins Cheat Sheet</div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════
+     ARCHITECTURE OVERVIEW
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">Overview</span>
+  <div>
+    <div class="phase-title">The Full nanochat Pipeline</div>
+    <div class="phase-sub">Every phase in this journal maps to one region of this diagram</div>
+  </div>
+</div>
+
+<!-- ── Architecture diagram: first slide, with concrete dimensions ── -->
+<div class="arch-diagram no-break">
+<svg viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" font-family="DM Sans, system-ui, sans-serif" style="width:100%;height:auto;background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:14px">
+  <defs>
+    <marker id="ablue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#185fa5"/></marker>
+    <marker id="ared" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c8440a"/></marker>
+    <marker id="aink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1a1917"/></marker>
+    <marker id="agreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1d6b45"/></marker>
+  </defs>
+
+  <text x="90"   y="28" text-anchor="middle" font-size="13" font-weight="600" fill="#0c447c">Input Token IDs</text>
+  <text x="90"   y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#3a3830">(12, 1024)</text>
+  <text x="240"  y="28" text-anchor="middle" font-size="13" font-weight="600" fill="#0c447c">wte Lookup</text>
+  <text x="240"  y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#3a3830">nn.Embedding</text>
+  <text x="400"  y="28" text-anchor="middle" font-size="13" font-weight="600" fill="#0c447c">Embeddings</text>
+  <text x="400"  y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#3a3830">(12, 1024, 384)</text>
+  <text x="640"  y="28" text-anchor="middle" font-size="13" font-weight="600" fill="#085041">N=6 &#215; Transformer Blocks</text>
+  <text x="640"  y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#3a3830">(12, 1024, 384) &#8594; (12, 1024, 384)</text>
+  <text x="860"  y="28" text-anchor="middle" font-size="13" font-weight="600" fill="#7a2a08">Context Vectors</text>
+  <text x="860"  y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#3a3830">(12, 1024, 384)</text>
+  <text x="1020" y="28" text-anchor="middle" font-size="13" font-weight="600" fill="#7a2a08">Output Logits</text>
+  <text x="1020" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#3a3830">(12, 1024, 50257)</text>
+  <text x="1140" y="28" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1917">Loss</text>
+  <text x="1140" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="11" fill="#3a3830">scalar</text>
+
+  <rect x="45" y="80" width="90" height="230" rx="6" fill="#e6f1fb" stroke="#185fa5" stroke-width="1.5"/>
+  <text x="90" y="104" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#0c447c">int64</text>
+  <text x="90" y="130" text-anchor="middle" font-size="10" fill="#0c447c">Example</text>
+  <text x="90" y="144" text-anchor="middle" font-size="10" fill="#0c447c">tokenised,</text>
+  <text x="90" y="158" text-anchor="middle" font-size="10" fill="#0c447c">token IDs,</text>
+  <text x="90" y="172" text-anchor="middle" font-size="10" fill="#0c447c">tokenised</text>
+  <text x="90" y="186" text-anchor="middle" font-size="10" fill="#0c447c">text,</text>
+  <text x="90" y="202" text-anchor="middle" font-size="10" fill="#0c447c">&#8230;</text>
+  <text x="90" y="218" text-anchor="middle" font-size="10" fill="#0c447c">example:</text>
+  <text x="90" y="232" text-anchor="middle" font-size="10" fill="#0c447c">tokenised</text>
+  <text x="90" y="246" text-anchor="middle" font-size="10" fill="#0c447c">text</text>
+  <text x="90" y="288" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#0c447c">int64</text>
+  <text x="90" y="333" text-anchor="middle" font-size="11" font-weight="600" fill="#0c447c">Input shape</text>
+  <text x="90" y="348" text-anchor="middle" font-family="JetBrains Mono" font-size="10.5" fill="#1a1917">(B=12, T=1024)</text>
+  <line x1="135" y1="195" x2="190" y2="195" stroke="#185fa5" stroke-width="2.2" marker-end="url(#ablue)"/>
+
+  <rect x="195" y="110" width="90" height="170" rx="6" fill="#e6f1fb" stroke="#185fa5" stroke-width="1.5"/>
+  <text x="240" y="195" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#0c447c" transform="rotate(-90,240,195)">self.wte = nn.Embedding(V, C)</text>
+  <text x="240" y="302" text-anchor="middle" font-size="11" font-weight="600" fill="#0c447c">wte &#183; Token Embeddings</text>
+  <text x="240" y="318" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#1a1917">V &#215; C = (50257, 384)</text>
+  <rect x="195" y="340" width="90" height="34" rx="4" fill="#c9ddf2" stroke="#185fa5" stroke-width="1"/>
+  <text x="240" y="353" text-anchor="middle" font-size="9.5" font-weight="600" fill="#0c447c">Place 1 &#183; Embedding</text>
+  <text x="240" y="366" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="#0c447c">(50257 &#215; 384)</text>
+  <line x1="285" y1="195" x2="345" y2="195" stroke="#185fa5" stroke-width="2.2" marker-end="url(#ablue)"/>
+
+  <rect x="350" y="155" width="105" height="80" rx="6" fill="#e6f1fb" stroke="#185fa5" stroke-width="1.5"/>
+  <text x="402" y="181" text-anchor="middle" font-size="11" font-weight="600" fill="#0c447c">Embeddings</text>
+  <text x="402" y="199" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#1a1917">(12, 1024, 384)</text>
+  <text x="402" y="220" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#3a3830">float32</text>
+
+  <circle cx="402" cy="275" r="14" fill="#fef9e7" stroke="#c8a800" stroke-width="1.5"/>
+  <text x="402" y="280" text-anchor="middle" font-size="15" font-weight="700" fill="#9a6800">+</text>
+
+  <rect x="345" y="305" width="115" height="66" rx="6" fill="#e6f1fb" stroke="#185fa5" stroke-width="1.5"/>
+  <text x="402" y="324" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0c447c">Positional</text>
+  <text x="402" y="339" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0c447c">Encoding (wpe)</text>
+  <text x="402" y="357" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#1a1917">(1024, 384)</text>
+  <line x1="402" y1="305" x2="402" y2="290" stroke="#185fa5" stroke-width="2.2"/>
+  <line x1="402" y1="235" x2="402" y2="260" stroke="#185fa5" stroke-width="2.2"/>
+  <path d="M417 275 L480 275 L480 195 L515 195" fill="none" stroke="#185fa5" stroke-width="2.2" marker-end="url(#ablue)"/>
+
+  <rect x="520" y="75" width="245" height="310" rx="9" fill="#e1f5ee" stroke="#1d6b45" stroke-width="1.8"/>
+  <text x="525" y="95" font-size="10.5" font-weight="600" fill="#085041">Residual Connections</text>
+  <path d="M545 108 Q 505 210 545 313" fill="none" stroke="#1d6b45" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <rect x="570" y="105" width="170" height="56" rx="6" fill="#c5e8d7" stroke="#1d6b45" stroke-width="1.2"/>
+  <text x="655" y="127" text-anchor="middle" font-size="11.5" font-weight="600" fill="#085041">Feed-Forward</text>
+  <text x="655" y="145" text-anchor="middle" font-size="11.5" font-weight="600" fill="#085041">Neural Network</text>
+  <rect x="570" y="198" width="170" height="48" rx="6" fill="#c5e8d7" stroke="#1d6b45" stroke-width="1.2"/>
+  <text x="655" y="227" text-anchor="middle" font-size="11.5" font-weight="600" fill="#085041">Layer Normalisation</text>
+  <rect x="570" y="283" width="170" height="70" rx="6" fill="#c5e8d7" stroke="#1d6b45" stroke-width="1.2"/>
+  <text x="655" y="307" text-anchor="middle" font-size="11.5" font-weight="600" fill="#085041">Self-Attention</text>
+  <text x="655" y="323" text-anchor="middle" font-size="11" fill="#085041">(Multi-Head)</text>
+  <text x="655" y="342" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#085041">n_head=6 &#183; head_dim=64</text>
+  <text x="748" y="98" font-family="JetBrains Mono" font-size="9" fill="#085041">(12, 1024, 384)</text>
+  <text x="748" y="185" font-family="JetBrains Mono" font-size="9" fill="#085041">(12, 1024, 384)</text>
+  <text x="748" y="270" font-family="JetBrains Mono" font-size="9" fill="#085041">(12, 1024, 384)</text>
+  <text x="748" y="378" font-family="JetBrains Mono" font-size="9" fill="#085041">(12, 1024, 384)</text>
+  <line x1="655" y1="105" x2="655" y2="68" stroke="#085041" stroke-width="2" marker-end="url(#agreen)"/>
+  <line x1="655" y1="198" x2="655" y2="165" stroke="#085041" stroke-width="2" marker-end="url(#agreen)"/>
+  <line x1="655" y1="283" x2="655" y2="252" stroke="#085041" stroke-width="2" marker-end="url(#agreen)"/>
+  <line x1="655" y1="385" x2="655" y2="357" stroke="#085041" stroke-width="2" marker-end="url(#agreen)"/>
+  <line x1="515" y1="195" x2="570" y2="195" stroke="#185fa5" stroke-width="2.2" marker-end="url(#ablue)"/>
+  <text x="640" y="405" text-anchor="middle" font-size="11" font-weight="600" fill="#085041">N &#215; Transformer Blocks</text>
+  <text x="640" y="421" text-anchor="middle" font-size="10" fill="#085041" font-style="italic">(N=6)</text>
+
+  <rect x="790" y="155" width="110" height="80" rx="6" fill="#fde7dc" stroke="#c8440a" stroke-width="1.5"/>
+  <text x="845" y="181" text-anchor="middle" font-size="11" font-weight="600" fill="#7a2a08">Context Vectors</text>
+  <text x="845" y="199" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#1a1917">(12, 1024, 384)</text>
+  <text x="845" y="220" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#3a3830">float32</text>
+  <line x1="765" y1="195" x2="785" y2="195" stroke="#c8440a" stroke-width="2.2" marker-end="url(#ared)"/>
+
+  <rect x="920" y="110" width="75" height="170" rx="6" fill="#fde7dc" stroke="#c8440a" stroke-width="1.5"/>
+  <text x="957" y="195" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#7a2a08" transform="rotate(-90,957,195)">self.lm_head = nn.Linear(C, V, bias=False)</text>
+  <text x="957" y="302" text-anchor="middle" font-size="11" font-weight="600" fill="#7a2a08">lm_head &#183; Output Proj</text>
+  <text x="957" y="318" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#1a1917">C &#215; V = (384, 50257)</text>
+  <rect x="915" y="340" width="85" height="34" rx="4" fill="#f3c8b0" stroke="#c8440a" stroke-width="1"/>
+  <text x="957" y="353" text-anchor="middle" font-size="9.5" font-weight="600" fill="#7a2a08">Place 2 &#183; Output</text>
+  <text x="957" y="366" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="#7a2a08">384 &#8594; 50257</text>
+  <line x1="900" y1="195" x2="915" y2="195" stroke="#c8440a" stroke-width="2.2" marker-end="url(#ared)"/>
+
+  <rect x="1000" y="155" width="95" height="80" rx="6" fill="#fde7dc" stroke="#c8440a" stroke-width="1.5"/>
+  <text x="1047" y="181" text-anchor="middle" font-size="11" font-weight="600" fill="#7a2a08">Output Logits</text>
+  <text x="1047" y="198" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#1a1917">(12, 1024,</text>
+  <text x="1047" y="212" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#1a1917">50257)</text>
+  <text x="1047" y="228" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#3a3830">float32</text>
+  <line x1="995" y1="195" x2="1000" y2="195" stroke="#c8440a" stroke-width="2.2" marker-end="url(#ared)"/>
+
+  <rect x="1100" y="155" width="90" height="80" rx="6" fill="#ede9e0" stroke="#1a1917" stroke-width="1.5"/>
+  <text x="1145" y="182" text-anchor="middle" font-size="11" font-weight="600" fill="#1a1917">Cross-Entropy</text>
+  <text x="1145" y="198" text-anchor="middle" font-size="11" font-weight="600" fill="#1a1917">Loss</text>
+  <text x="1145" y="218" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#3a3830">F.cross_entropy</text>
+  <line x1="1095" y1="195" x2="1100" y2="195" stroke="#1a1917" stroke-width="2.2" marker-end="url(#aink)"/>
+  <rect x="1095" y="310" width="100" height="75" rx="6" fill="#e6f1fb" stroke="#185fa5" stroke-width="1.5"/>
+  <text x="1145" y="332" text-anchor="middle" font-size="11" font-weight="600" fill="#0c447c">Target IDs (Y)</text>
+  <text x="1145" y="350" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#1a1917">(12, 1024)</text>
+  <text x="1145" y="368" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#3a3830">int64</text>
+  <line x1="1145" y1="310" x2="1145" y2="240" stroke="#1a1917" stroke-width="2" marker-end="url(#aink)"/>
+
+  <text x="90"   y="455" text-anchor="middle" font-size="10" fill="#3a3830">Raw token IDs from get_batch</text>
+  <text x="240"  y="455" text-anchor="middle" font-size="10" fill="#3a3830">Row-lookup, no matmul</text>
+  <text x="402"  y="455" text-anchor="middle" font-size="10" fill="#3a3830">Token + Position added elementwise</text>
+  <text x="640"  y="455" text-anchor="middle" font-size="10" fill="#3a3830">Repeated N=6 times &#183; shape preserved</text>
+  <text x="957"  y="455" text-anchor="middle" font-size="10" fill="#3a3830">Projects each position back to vocab</text>
+  <text x="1145" y="455" text-anchor="middle" font-size="10" fill="#3a3830">Compare to next-token targets</text>
+
+  <rect x="60" y="485" width="1080" height="56" rx="8" fill="#f2efe9" stroke="#d8d3c8"/>
+  <text x="80" y="505" font-size="11" font-weight="600" fill="#3a3830">Shape trace</text>
+  <text x="80" y="525" font-family="JetBrains Mono" font-size="11.5" fill="#1a1917">(12, 1024) <tspan fill="#9a9890">&#8594;</tspan> <tspan fill="#185fa5">wte</tspan> <tspan fill="#9a9890">&#8594;</tspan> (12, 1024, 384) <tspan fill="#9a9890">&#8594;</tspan> <tspan fill="#085041">6&#215; Block</tspan> <tspan fill="#9a9890">&#8594;</tspan> (12, 1024, 384) <tspan fill="#9a9890">&#8594;</tspan> <tspan fill="#c8440a">lm_head</tspan> <tspan fill="#9a9890">&#8594;</tspan> (12, 1024, 50257) <tspan fill="#9a9890">&#8594;</tspan> <tspan fill="#1a1917">cross_entropy</tspan> <tspan fill="#9a9890">&#8594;</tspan> <tspan fill="#c8440a" font-weight="700">scalar loss</tspan></text>
+</svg>
+
+<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:.72rem;margin-top:10px">
+  <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:4px;border:.5px solid var(--rule);background:#e6f1fb;color:#0c447c"><span style="width:10px;height:10px;border-radius:2px;background:#c9ddf2;border:1px solid #a8c6e5"></span> Input / Embeddings</span>
+  <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:4px;border:.5px solid var(--rule);background:#e1f5ee;color:#085041"><span style="width:10px;height:10px;border-radius:2px;background:#c5e8d7;border:1px solid #8ed0b8"></span> Core Transformer Layers</span>
+  <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:4px;border:.5px solid var(--rule);background:#fde7dc;color:#7a2a08"><span style="width:10px;height:10px;border-radius:2px;background:#f3c8b0;border:1px solid #e8b098"></span> Output Head</span>
+  <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:4px;border:.5px solid var(--rule);background:#ede9e0;color:#2a2824"><span style="width:10px;height:10px;border-radius:2px;background:#d4cfc4;border:1px solid #b8b2a4"></span> Operations</span>
+</div>
+</div>
+
+<h3>Colour key</h3>
+<table class="no-break">
+<thead><tr><th>Colour</th><th>Region</th><th>Covered in</th></tr></thead>
+<tbody>
+<tr><td style="background:#dbeafe;color:#1e3a8a;font-weight:600">■ Blue</td><td>Input token IDs → wte embedding → positional encoding</td><td>Phase 1 + Phase 2</td></tr>
+<tr><td style="background:#dcfce7;color:#14532d;font-weight:600">■ Green</td><td>N × Transformer Blocks — attention + LayerNorm + FFN + residuals</td><td>Phase 3 + Phase 4</td></tr>
+<tr><td style="background:#fee2e2;color:#7f1d1d;font-weight:600">■ Red</td><td>lm_head output projection → logits → cross-entropy loss</td><td>Phase 5</td></tr>
+</tbody>
+</table>
+
+<h3>The shape trace — left to right across the diagram</h3>
+<div class="shape-flow">
+<span class="sf-note">get_batch()   </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T)          </span><span class="sf-note">= (12, 1024)          int64    raw token IDs from train.bin</span>
+<span class="sf-note">wte(idx)      </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, C)       </span><span class="sf-note">= (12, 1024, 384)     float32  each integer → 384-dim vector    [Entrance]</span>
+<span class="sf-note">+ wpe(pos)    </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, C)       </span><span class="sf-note">= (12, 1024, 384)     float32  vectors now know their position</span>
+<span class="sf-note">× N blocks    </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, C)       </span><span class="sf-note">= (12, 1024, 384)     float32  same shape, richer meaning       [Thinking]</span>
+<span class="sf-note">lm_head(x)    </span><span class="sf-arrow">→ </span><span class="sf-shape">(B, T, V)       </span><span class="sf-note">= (12, 1024, 50257)   float32  one logit per vocab token         [Exit]</span>
+<span class="sf-note">cross_entropy </span><span class="sf-arrow">→ </span><span class="sf-shape">scalar          </span><span class="sf-note">= single float32      float32  the loss minimised during training</span>
+</div>
+
+<div class="callout c-note">
+<strong>Naming convention throughout this document</strong>
+B = batch_size (12) &nbsp;·&nbsp; T = block_size / sequence length (1024) &nbsp;·&nbsp; C = n_embd (384) &nbsp;·&nbsp; V = vocab_size (50,257) &nbsp;·&nbsp; N = n_layer (6) &nbsp;·&nbsp; d_h = head_dim = C/n_head = 64<br>
+<strong>C and n_embd are identical.</strong> C is used in shape traces (shorter). n_embd appears in GPTConfig and code.
+</div>
+
+<h3>The two places vocab_size appears (Place 1 and Place 2 in the diagram)</h3>
+<div class="g2">
+<div class="card card-blue">
+  <div class="card-title">Place 1 — wte (Entrance)</div>
+  <div class="card-body">
+    <code>nn.Embedding(vocab_size, n_embd)</code> <span class="pt">PT</span><br>
+    Shape: (50,257 × 384) = 19.3M parameters<br>
+    One learnable row per vocabulary token.<br>
+    Integer ID → 384-dim float vector.
+  </div>
+</div>
+<div class="card card-red">
+  <div class="card-title">Place 2 — lm_head (Exit)</div>
+  <div class="card-body">
+    <code>nn.Linear(n_embd, vocab_size, bias=False)</code> <span class="pt">PT</span><br>
+    Shape: (384 → 50,257)<br>
+    One output score per vocabulary token.<br>
+    Highest logit = predicted next token.
+  </div>
+</div>
+</div>
+
+<div class="callout c-key">
+<strong>Weight tying — wte and lm_head share the same matrix</strong>
+<code>self.lm_head.weight = self.transformer.wte.weight</code> <span class="nc">NC</span><br>
+The entrance and exit share parameters. The same "meaning geometry" that encodes tokens also scores their likelihood. Halves parameter count at these two large layers.
+</div>
+
+<div class="section-break"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     THE THREE KEY TERMS
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">Key Terms</span>
+  <div>
+    <div class="phase-title">wte · lm_head · n_head</div>
+    <div class="phase-sub">The Entrance, Exit, and Thinking Style of the model</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><span class="layer-label">The intuition</span></div>
+    <p>Computers can't do math on words. Raw token IDs like <code>50256</code> are just arbitrary integers — the number itself carries no meaning. Three architectural elements bridge the gap between text and computation.</p>
+  </div>
+  <div class="g3">
+    <div class="card card-blue">
+      <div class="card-title">wte — The Entrance</div>
+      <div class="card-body">
+        A giant lookup table. Token ID → 384 floats encoding meaning.<br><br>
+        <strong>Shape:</strong> (50,257 × 384)<br>
+        <strong>Params:</strong> 19.3M learnable<br><br>
+        ID 2746 → row 2746 → [0.21, −0.54, 0.88, …]<br>
+        Pure lookup — no matrix multiply.
+      </div>
+    </div>
+    <div class="card card-red">
+      <div class="card-title">lm_head — The Exit</div>
+      <div class="card-body">
+        Projects 384-dim context back to 50,257 scores.<br><br>
+        <strong>Shape:</strong> (384 → 50,257)<br>
+        <strong>Output:</strong> one logit per vocab token<br><br>
+        Highest logit = predicted next token.<br>
+        Shares weights with wte (weight tying).
+      </div>
+    </div>
+    <div class="card" style="background:#f5f0fe;border-color:#b09ae0;border-top:2.5px solid #6b3fa0">
+      <div class="card-title" style="color:#6b3fa0">n_head — Thinking Style</div>
+      <div class="card-body">
+        Divides 384 dims into 6 specialist perspectives.<br><br>
+        <strong>Split:</strong> 384 ÷ 6 = 64 dims per head<br>
+        <strong>Pattern:</strong> view() → transpose() → parallel attention<br><br>
+        Each head learns its own focus. Results concatenated back to 384.
+      </div>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — n_head specialisation</span></div>
+    <div class="visual">
+      <div class="visual-title">The photo analogy — looking at "a cat sitting on a mat"</div>
+      <div class="g2">
+        <div>
+          <p style="font-size:.8rem"><strong>With 1 head:</strong> look at everything at once — trying to understand colour, shape, relationships, text all simultaneously. Limited capacity, no specialisation.</p>
+        </div>
+        <div>
+          <p style="font-size:.8rem"><strong>With 6 heads</strong> (each sees only 64 of 384 dims):</p>
+          <div style="font-size:.75rem;font-family:var(--mono);line-height:1.9">
+            Head 0 → grammar relationships?<br>
+            Head 1 → topic / subject matter?<br>
+            Head 2 → nearby context?<br>
+            Head 3 → coreference ("it" = what)?<br>
+            Head 4 → long-range dependencies?<br>
+            Head 5 → positional patterns?
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout c-purple">
+      <strong>The constraint that creates specialisation</strong>
+      Each head only sees 64 of the 384 dimensions. It <em>cannot</em> try to track everything — it is forced to develop a focused perspective. Scarcity is what makes the heads diverge. The model learns what each head specialises in — you never assign roles manually.
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><span class="layer-label">Summary table</span></div>
+    <table class="no-break">
+    <thead><tr><th>Term</th><th>What it is</th><th>Analogy</th><th>Shape</th><th>PyTorch</th></tr></thead>
+    <tbody>
+    <tr><td class="td-mono">wte</td><td>Token embedding table</td><td>Dictionary: ID → coordinates</td><td>(50257, 384)</td><td><span class="pt">PT</span> nn.Embedding</td></tr>
+    <tr><td class="td-mono">lm_head</td><td>Output projection</td><td>Voting booth: pick next word</td><td>(384, 50257)</td><td><span class="pt">PT</span> nn.Linear</td></tr>
+    <tr><td class="td-mono">n_head</td><td>Attention head count</td><td>Team of specialists</td><td>splits C → 6 × 64</td><td><span class="nc">NC</span> split logic</td></tr>
+    </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section-break"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LOGITS · SOFTMAX · CROSS-ENTROPY
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">Output</span>
+  <div>
+    <div class="phase-title">Logits, Softmax, and Cross-Entropy Loss</div>
+    <div class="phase-sub">The output pipeline — from context vectors to training signal</div>
+  </div>
+</div>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><span class="layer-label">The problem</span></div>
+    <p>After the transformer blocks finish processing, each token position holds a 384-dim vector. But the model's job is to predict the <em>next token</em> from 50,257 possibilities. Three operations convert that vector into a training signal.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — the three-step pipeline</span></div>
+    <div class="g3">
+      <div class="card">
+        <div class="card-title">① Logits — raw scores</div>
+        <div class="card-body">
+          Output of lm_head. Not probabilities — just rankings. Can be any value, positive or negative.<br><br>
+          <span class="tok tok-p">"cat" → 8.7</span>
+          <span class="tok tok-g">"sat" → 6.2</span>
+          <span class="tok tok-b">"the" → 2.1</span>
+          <span class="tok tok-r">"jumped" → −1.4</span><br><br>
+          Negative = unlikely, not impossible. Don't sum to anything meaningful yet.
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">② Softmax — probabilities</div>
+        <div class="card-body">
+          Three steps: <strong>exp()</strong> → <strong>sum</strong> → <strong>divide</strong>.<br>
+          Result sums to exactly 1.0.<br><br>
+          exp(8.7) = 6002.9<br>
+          exp(6.2) = &nbsp;492.7<br>
+          sum&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = 6505.4<br><br>
+          "cat" → 6002.9/6505.4 = <strong>92.3%</strong><br>
+          Ranking is preserved. Only scale changes.
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">③ Cross-entropy — loss</div>
+        <div class="card-body">
+          <strong>loss = −log(prob of correct token)</strong><br><br>
+          95% correct → −log(0.95) = <strong style="color:green">0.05</strong> ✓<br>
+          50% correct → −log(0.50) = <strong style="color:orange">0.69</strong><br>
+          &nbsp;1% correct → −log(0.01) = <strong style="color:red">4.61</strong> ✗<br>
+          &nbsp;0% correct → −log(0.00) = <strong style="color:red">∞</strong><br><br>
+          One scalar. Flows backward through every layer during training.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">Implementation</span></div>
+<pre><span class="cc"># ── TRAINING ─────────────────────────────────────────────────────────</span>
+logits = self.lm_head(x)             <span class="ptag">PT</span>  <span class="cc"># (B, T, 50257) raw scores</span>
+
+loss = F.cross_entropy(              <span class="ptag">PT</span>  <span class="cc"># fused log-softmax — numerically stable</span>
+    logits.view(-1, vocab_size),     <span class="nctag">NC</span>  <span class="cc"># (B*T, 50257) — flatten for PyTorch</span>
+    targets.view(-1)                 <span class="nctag">NC</span>  <span class="cc"># (B*T,)       — flatten targets</span>
+)
+<span class="cc"># Returns one scalar — average loss across all B*T token predictions</span>
+loss.backward()   <span class="ptag">PT</span>  <span class="cc"># nudge every weight to reduce this number</span>
+
+<span class="cc"># ── INFERENCE ────────────────────────────────────────────────────────</span>
+last_logits = logits[:, -1, :]            <span class="nctag">NC</span>  <span class="cc"># (B, 50257) — last position only</span>
+probs = F.softmax(last_logits, dim=-1)    <span class="ptag">PT</span>  <span class="cc"># probabilities summing to 1</span>
+
+<span class="cc"># Option A — greedy (deterministic, always picks highest)</span>
+next_token = probs.argmax(dim=-1)         <span class="ptag">PT</span>
+
+<span class="cc"># Option B — sampling (creative, weighted random)</span>
+next_token = torch.multinomial(probs, 1)  <span class="ptag">PT</span>
+
+idx = torch.cat([idx, next_token], dim=1) <span class="ptag">PT</span>  <span class="cc"># append and loop</span></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><span class="layer-label">Key insights</span></div>
+    <div class="callout c-warn">
+      <strong>Never softmax before F.cross_entropy</strong>
+      F.cross_entropy applies log-softmax internally in a fused, numerically stable operation. Softmaxing first produces numbers like 0.9999997 — log() loses floating-point precision and errors accumulate across B×T predictions.
+    </div>
+    <div class="callout c-note">
+      <strong>Training vs inference — the key difference</strong>
+      Training: use ALL T positions simultaneously, compare against targets, compute loss.<br>
+      Inference: use only the LAST position's logit (<code>logits[:, -1, :]</code>), no targets, softmax to pick next token.
+    </div>
+    <div class="callout c-green">
+      <strong>The causal mask preview</strong>
+      Attention scores are (T, T) pairwise relevance ratings. The causal mask sets scores above the diagonal to −∞ before softmax — token at position t cannot attend to positions t+1, t+2, …. After softmax, −∞ becomes zero probability. Future tokens contribute nothing.
+    </div>
+  </div>
+</div>
+
+<div class="section-break"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     PHASE 1 — TOKENISATION
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">Phase 1</span>
+  <div>
+    <div class="phase-title">Tokenisation</div>
+    <div class="phase-sub">How raw text becomes integer tensors the model can process</div>
+  </div>
+</div>
+
+<p>A neural network can only work with numbers. The tokeniser is the bridge — it sits entirely outside the PyTorch model, has no trainable parameters, and runs once before training begins.</p>
+<div class="shape-flow"><span class="sf-note">"Hello world"  </span><span class="sf-arrow">→ </span><span class="sf-shape">[15496, 995]  </span><span class="sf-arrow">→ </span><span class="sf-shape">nn.Embedding  </span><span class="sf-arrow">→ </span><span class="sf-shape">(2, 384) float tensor</span></div>
+
+<h2>1.1 — BPE (Byte Pair Encoding)</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><span class="layer-label">The problem — three bad options</span></div>
+    <table class="no-break">
+    <thead><tr><th>Strategy</th><th>Vocab size</th><th>"unhappiness"</th><th>Context efficiency</th><th>Problem</th></tr></thead>
+    <tbody>
+    <tr><td>Character-level</td><td>65</td><td>11 tokens</td><td>~930 chars / 1024 T</td><td>Wastes context window</td></tr>
+    <tr class="row-win"><td><strong>BPE subword ★</strong></td><td><strong>50,257</strong></td><td><strong>3 tokens</strong></td><td><strong>~4000 chars / 1024 T</strong></td><td><strong>Best of both worlds</strong></td></tr>
+    <tr><td>Word-level</td><td>millions</td><td>1 token</td><td>great</td><td>Unknown words get no embedding</td></tr>
+    </tbody>
+    </table>
+    <p>BPE hits the sweet spot — small enough vocabulary for efficient embeddings, large enough tokens to pack real meaning into the context window. A 1024-token window holds ~930 characters at char-level vs ~4000 at BPE — a 4× win.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — the algorithm running step by step</span></div>
+    <p>BPE is greedy statistics — nothing more. Start with characters. Find the most frequent adjacent pair. Merge it. Repeat until vocabulary target is hit.</p>
+    <div class="visual no-break">
+      <div class="visual-title">Corpus: "low"(×5) · "lower"(×2) · "newest"(×6) — with end-of-word marker Ġ</div>
+
+      <div style="margin-bottom:12px">
+        <div style="font-size:.68rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink4);margin-bottom:6px">Step 0 — Split into characters</div>
+        <div class="merge-step"><span class="ms-before">l o w Ġ</span><span style="color:var(--ink4)">·</span><span class="ms-before">l o w e r Ġ</span><span style="color:var(--ink4)">·</span><span class="ms-before">n e w e s t Ġ</span></div>
+        <div class="vocab-row"><span class="vtok">l</span><span class="vtok">o</span><span class="vtok">w</span><span class="vtok">e</span><span class="vtok">r</span><span class="vtok">n</span><span class="vtok">s</span><span class="vtok">t</span><span class="vtok">Ġ</span><span style="font-size:.7rem;color:var(--ink4);align-self:center;margin-left:6px">9 tokens — vocab size 9</span></div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="font-size:.68rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink4);margin-bottom:6px">Count adjacent pairs — find the winner</div>
+        <table style="width:auto;font-size:.75rem">
+          <tr><th>Pair</th><th>Appears in</th><th>Count</th></tr>
+          <tr style="background:var(--nc-bg)"><td class="td-mono">l + o</td><td>"low", "lower"</td><td><strong>2 ← winner</strong></td></tr>
+          <tr><td class="td-mono">o + w</td><td>"low", "lower"</td><td>2 (tie — "l+o" wins first)</td></tr>
+          <tr><td class="td-mono">w + e</td><td>"lower", "newest"</td><td>2</td></tr>
+          <tr><td class="td-mono">e + s</td><td>"newest"</td><td>1</td></tr>
+        </table>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div class="merge-step"><span class="ms-num">MERGE 1</span><span class="ms-before">l + o</span><span class="ms-arr">→</span><span class="ms-new">lo</span></div>
+        <div class="merge-step"><span style="width:72px"></span><span class="ms-before">l o w Ġ → </span><span style="font-family:var(--mono);font-size:.78rem;font-weight:600">lo w Ġ</span></div>
+        <div class="merge-step"><span style="width:72px"></span><span class="ms-before">l o w e r Ġ → </span><span style="font-family:var(--mono);font-size:.78rem;font-weight:600">lo w e r Ġ</span></div>
+        <div class="vocab-row"><span class="vtok">l</span><span class="vtok">o</span><span class="vtok">w</span><span class="vtok">e</span><span class="vtok">r</span><span class="vtok">n</span><span class="vtok">s</span><span class="vtok">t</span><span class="vtok">Ġ</span><span class="vtok vtok-new">lo</span><span style="font-size:.7rem;color:var(--ink4);align-self:center;margin-left:6px">10 tokens</span></div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div class="merge-step"><span class="ms-num">MERGE 2</span><span class="ms-before">lo + w</span><span class="ms-arr">→</span><span class="ms-new">low</span></div>
+        <div class="merge-step"><span style="width:72px"></span><span class="ms-before">lo w Ġ → </span><span style="font-family:var(--mono);font-size:.78rem;font-weight:600">low Ġ</span></div>
+        <div class="merge-step"><span style="width:72px"></span><span class="ms-before">lo w e r Ġ → </span><span style="font-family:var(--mono);font-size:.78rem;font-weight:600">low e r Ġ</span></div>
+        <div class="vocab-row"><span class="vtok">l</span><span class="vtok">o</span><span class="vtok">w</span><span class="vtok">e</span><span class="vtok">r</span><span class="vtok">n</span><span class="vtok">s</span><span class="vtok">t</span><span class="vtok">Ġ</span><span class="vtok vtok-new">lo</span><span class="vtok vtok-new">low</span><span style="font-size:.7rem;color:var(--ink4);align-self:center;margin-left:6px">11 tokens</span></div>
+      </div>
+
+      <div>
+        <div style="font-size:.78rem;color:var(--ink2);margin-top:4px">After thousands of merges on real web text, unseen words still tokenise cleanly:</div>
+        <div style="margin-top:6px;font-size:.78rem">"lowering" → <span class="tok tok-p">low</span><span class="tok tok-g">er</span><span class="tok tok-a">ing</span><span class="tok">Ġ</span> — shares <strong>low</strong> with "low", "lower", "lowest". Meaning shared by construction.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">From-scratch Python implementation</span></div>
+<pre><span class="cc"># [NC] All code below — plain Python, no PyTorch needed</span>
+<span class="ck">from</span> collections <span class="ck">import</span> Counter
+
+<span class="ck">def</span> get_pairs(vocab):
+    <span class="cs">"""Count all adjacent pairs across the whole corpus."""</span>
+    pairs = Counter()
+    <span class="ck">for</span> word, freq <span class="ck">in</span> vocab.items():
+        symbols = word.split()
+        <span class="ck">for</span> i <span class="ck">in</span> range(len(symbols) - 1):
+            pairs[(symbols[i], symbols[i+1])] += freq
+    <span class="ck">return</span> pairs
+
+<span class="ck">def</span> merge_vocab(pair, vocab):
+    <span class="cs">"""Replace winning pair everywhere in corpus."""</span>
+    new_vocab = {}
+    bigram = <span class="cs">' '</span>.join(pair)
+    replacement = <span class="cs">''</span>.join(pair)
+    <span class="ck">for</span> word <span class="ck">in</span> vocab:
+        new_vocab[word.replace(bigram, replacement)] = vocab[word]
+    <span class="ck">return</span> new_vocab
+
+vocab = {<span class="cs">'l o w Ġ'</span>: 5, <span class="cs">'l o w e r Ġ'</span>: 2, <span class="cs">'n e w e s t Ġ'</span>: 6}
+merge_rules = []          <span class="cc"># this ordered list IS the tokeniser</span>
+
+<span class="ck">for</span> i <span class="ck">in</span> range(10):
+    best  = max(get_pairs(vocab), key=get_pairs(vocab).get)
+    vocab = merge_vocab(best, vocab)
+    merge_rules.append(best)
+    <span class="cc"># merge_rules = [('l','o'), ('lo','w'), ('low','e'), ...]</span>
+
+<span class="cc"># Encode new text: apply merge rules in order</span>
+<span class="ck">def</span> tokenise(text, merge_rules):
+    words = [<span class="cs">' '</span>.join(list(w)) + <span class="cs">' Ġ'</span> <span class="ck">for</span> w <span class="ck">in</span> text.split()]
+    <span class="ck">for</span> (a, b) <span class="ck">in</span> merge_rules:
+        words = [t.replace(f<span class="cs">'{a} {b}'</span>, f<span class="cs">'{a}{b}'</span>) <span class="ck">for</span> t <span class="ck">in</span> words]
+    <span class="ck">return</span> [tok <span class="ck">for</span> t <span class="ck">in</span> words <span class="ck">for</span> tok <span class="ck">in</span> t.split()]</pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><span class="layer-label">Key insight</span></div>
+    <div class="callout c-key">
+      <strong>The merge_rules list IS the tokeniser</strong>
+      Not the final vocabulary — the <em>ordered list of merges</em>. To encode new text you don't look up a dictionary; you apply each merge rule in order, transforming the character sequence step by step. Serialise this list to disk and you have a complete, reloadable tokeniser. This is exactly what tiktoken distributes — 50,000 merge rules compiled in Rust.
+    </div>
+  </div>
+</div>
+
+<h2>1.2 — tiktoken (what nanochat uses)</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><span class="layer-label">What tiktoken is</span></div>
+    <p>tiktoken is GPT-2's pre-trained BPE tokeniser — 50,000 merge rules trained by OpenAI on web text, shipped as a fast Rust library. You are <em>borrowing</em> their vocabulary, not training your own. The interface mirrors the char tokeniser: <code>encode()</code> and <code>decode()</code>.</p>
+    <table class="no-break">
+    <thead><tr><th></th><th>Char tokeniser</th><th>tiktoken GPT-2</th></tr></thead>
+    <tbody>
+    <tr><td>Vocab size</td><td>65</td><td>50,257</td></tr>
+    <tr><td>Chars per token</td><td>1</td><td>~4</td></tr>
+    <tr><td>Context efficiency</td><td>poor</td><td>4× better</td></tr>
+    <tr><td>Vocab trained on</td><td>your corpus</td><td>OpenAI web text</td></tr>
+    <tr><td>Dependency</td><td>none</td><td>pip install tiktoken</td></tr>
+    </tbody>
+    </table>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">Usage + data preparation</span></div>
+<pre><span class="ck">import</span> tiktoken, numpy <span class="ck">as</span> np
+
+enc = tiktoken.get_encoding(<span class="cs">"gpt2"</span>)       <span class="nctag">NC</span>
+<span class="cc"># "gpt2" → 50,257 tokens · "cl100k_base" → GPT-4 (100k tokens)</span>
+<span class="cc"># Downloads ~500KB merge rules once, caches in ~/.tiktoken</span>
+
+<span class="cc"># encode / decode — same interface as char tokeniser</span>
+ids  = enc.encode_ordinary(text)           <span class="nctag">NC</span>  <span class="cc"># str → list[int]</span>
+text = enc.decode(ids)                     <span class="nctag">NC</span>  <span class="cc"># list[int] → str</span>
+
+<span class="cc"># Inspect individual tokens (very useful for debugging):</span>
+<span class="cc"># enc.decode([314]) → ' I'  ← note the leading space!</span>
+<span class="cc"># Spaces attach to the following word in GPT-2's vocab</span>
+
+<span class="cc"># ── prepare.py — run ONCE before training ──────────────────</span>
+<span class="ck">with</span> open(<span class="cs">'data/input.txt'</span>) <span class="ck">as</span> f: data = f.read()
+ids = enc.encode_ordinary(data)            <span class="nctag">NC</span>
+n   = int(0.9 * len(ids))
+np.array(ids[:n], dtype=np.uint16).tofile(<span class="cs">'data/train.bin'</span>)  <span class="nctag">NC</span>
+np.array(ids[n:], dtype=np.uint16).tofile(<span class="cs">'data/val.bin'</span>)    <span class="nctag">NC</span>
+<span class="cc"># uint16 = 2 bytes/token vs int64 = 8 bytes → 4× smaller files</span>
+<span class="cc"># Values 0..50256 fit in uint16 (max 65535)</span>
+
+<span class="cc"># ── get_batch() — loads from .bin at training time ─────────</span>
+train_data = np.memmap(<span class="cs">'data/train.bin'</span>, dtype=np.uint16, mode=<span class="cs">'r'</span>)  <span class="nctag">NC</span>
+
+<span class="ck">def</span> get_batch(split):                                              <span class="nctag">NC</span>
+    data = train_data <span class="ck">if</span> split == <span class="cs">'train'</span> <span class="ck">else</span> val_data
+    ix   = torch.randint(len(data) - block_size, (batch_size,))   <span class="ptag">PT</span>
+    x    = torch.stack([torch.from_numpy(                          <span class="ptag">PT</span>
+               data[i  :i+block_size  ].astype(np.int64)) <span class="ck">for</span> i <span class="ck">in</span> ix])
+    y    = torch.stack([torch.from_numpy(                          <span class="ptag">PT</span>
+               data[i+1:i+block_size+1].astype(np.int64)) <span class="ck">for</span> i <span class="ck">in</span> ix])
+    <span class="ck">return</span> x.to(device), y.to(device)                             <span class="ptag">PT</span>
+<span class="cc"># x: (B, T) int64   y: (B, T) int64  — same shape, y is x shifted right by 1
+# .astype(np.int64): files stored as uint16 (compact), nn.Embedding needs int64</span></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><span class="layer-label">Key insights</span></div>
+    <div class="callout c-warn">
+      <strong>encode_ordinary vs encode — important distinction</strong>
+      Use <code>encode_ordinary()</code> for data prep — treats &lt;|endoftext|&gt; as plain text. Use <code>encode()</code> with <code>allowed_special</code> when inserting EOT tokens between documents. Mixing them silently produces different token IDs for the same text.
+    </div>
+    <div class="callout c-key">
+      <strong>The training signal — x and y shifted by 1</strong>
+      Position 0: given [F], predict i &nbsp;·&nbsp; Position 1: given [F,i], predict r &nbsp;·&nbsp; …<br>
+      One sequence of 1024 tokens gives 1024 independent training examples — all computed in a single forward pass. The causal mask ensures each position only sees its own past.
+    </div>
+  </div>
+</div>
+
+<h2>1.3 — Character-level tokeniser (Shakespeare demo)</h2>
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">Complete implementation — 15 lines of plain Python</span></div>
+<pre><span class="cc"># [NC] entirely — plain Python, no PyTorch until the tensor conversion</span>
+<span class="ck">import</span> torch                                            <span class="ptag">PT</span>
+
+<span class="ck">with</span> open(<span class="cs">'shakespeare.txt'</span>, <span class="cs">'r'</span>, encoding=<span class="cs">'utf-8'</span>) <span class="ck">as</span> f:
+    text = f.read()
+
+chars      = sorted(list(set(text)))  <span class="nctag">NC</span>  <span class="cc"># 65 unique chars in Shakespeare</span>
+vocab_size = len(chars)               <span class="nctag">NC</span>  <span class="cc"># sorted() = deterministic mapping across runs</span>
+
+stoi = { ch:i <span class="ck">for</span> i,ch <span class="ck">in</span> enumerate(chars) }  <span class="nctag">NC</span>  <span class="cc"># string → int</span>
+itos = { i:ch <span class="ck">for</span> i,ch <span class="ck">in</span> enumerate(chars) }  <span class="nctag">NC</span>  <span class="cc"># int → string</span>
+
+encode = <span class="ck">lambda</span> s: [stoi[c] <span class="ck">for</span> c <span class="ck">in</span> s]           <span class="nctag">NC</span>
+decode = <span class="ck">lambda</span> l: <span class="cs">''</span>.join([itos[i] <span class="ck">for</span> i <span class="ck">in</span> l])  <span class="nctag">NC</span>
+
+<span class="cc"># PyTorch enters only for tensor conversion:</span>
+data = torch.tensor(encode(text), dtype=torch.long)   <span class="ptag">PT</span>
+<span class="cc"># shape: torch.Size([1115394]) — the full Shakespeare corpus as integers</span>
+
+n          = int(0.9 * len(data))        <span class="nctag">NC</span>
+train_data = data[:n]                    <span class="nctag">NC</span>
+val_data   = data[n:]                    <span class="nctag">NC</span></pre>
+    <div class="callout c-note">
+      <strong>Why sorted()?</strong>
+      <code>set()</code> gives a random order each run — without <code>sorted()</code>, the same character maps to a different integer every time. The model would load saved weights and map them to the wrong characters. Determinism is essential for reproducibility.
+    </div>
+  </div>
+</div>
+
+<h3>Phase 1 — Key takeaways</h3>
+<div class="callout c-green no-break">
+  <strong>Six things that stick after Phase 1</strong>
+  <ol style="margin:6px 0 0 22px;padding:0;font-size:.86rem;line-height:1.7">
+    <li><strong>The tokeniser is pure Python.</strong> No PyTorch, no GPU, no training. It runs <em>once</em> on raw text and produces integer arrays on disk.</li>
+    <li><strong>Two designs, same interface.</strong> Char tokeniser uses <code>stoi</code>/<code>itos</code> dicts; tiktoken uses compiled Rust. Both expose <code>encode(str) → list[int]</code> and <code>decode(list[int]) → str</code>.</li>
+    <li><strong>BPE <em>merge rules</em> are the tokeniser</strong> — not the final vocabulary list. To encode new text, apply each merge rule in order to the character sequence.</li>
+    <li><strong><code>vocab_size</code> flows into exactly two model layers</strong> — <code>nn.Embedding</code> at the input and <code>nn.Linear</code> (lm_head) at the output. Change tokeniser → change both.</li>
+    <li><strong>dtype discipline.</strong> Save as <code>uint16</code> (compact, 2 bytes/token), load and convert to <code>int64</code> in <code>get_batch()</code> — required by <code>nn.Embedding</code>.</li>
+    <li><strong>PyTorch built-ins in Phase 1</strong> are only in <code>get_batch()</code>: <code>torch.randint</code>, <code>torch.stack</code>, <code>torch.from_numpy</code>, <code>.to(device)</code>, <code>torch.tensor</code>.</li>
+  </ol>
+</div>
+
+<div class="section-break"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     PHASE 2 — EMBEDDINGS
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">Phase 2</span>
+  <div>
+    <div class="phase-title">Embeddings</div>
+    <div class="phase-sub">How integer token IDs become float vectors, and how the model knows word order</div>
+  </div>
+</div>
+
+<p>After Phase 1, <code>get_batch()</code> returns <code>idx</code> of shape <strong>(B, T) = (12, 1024)</strong> — a grid of integers. Integers are arbitrary IDs. The number 2746 has no mathematical relationship to 2747. You can't do meaningful matrix multiplication on raw integers. Embeddings fix this — converting each integer into a 384-dimensional float vector where proximity encodes meaning.</p>
+
+<h2>2.1 — idx: what it is and what it contains</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — idx is just a grid of integers</span></div>
+    <div class="visual no-break">
+      <div class="visual-title">idx shape: (B=3, T=8) — each cell is a token ID</div>
+      <pre style="background:var(--paper3);color:var(--ink);border-radius:5px;border:.5px solid var(--rule)">idx = tensor([
+    [18, 47, 56, 57, 58,  1, 15, 47],   <span class="nctag">NC</span>  # sentence 1: "First Ci…"
+    [39, 44, 42, 53, 56,  1, 58, 46],   <span class="nctag">NC</span>  # sentence 2: "before t…"
+    [ 1, 61, 47, 50, 50,  1, 58, 46],   <span class="nctag">NC</span>  # sentence 3: " will th…"
+])
+# dtype: int64   shape: (B=3, T=8)
+# Every cell is just an integer — a row number into the embedding table</pre>
+    </div>
+    <p><code>idx</code> lives for exactly <em>one line</em> in <code>forward()</code>. It enters as integers, <code>wte</code> converts it to vectors, and from that point on everything is called <code>x</code> and operates in float vector space. <code>idx</code> is never used again.</p>
+  </div>
+</div>
+
+<h2>2.2 — nn.Embedding: the lookup table (wte)</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><span class="layer-label">What it is</span></div>
+    <p><code>nn.Embedding</code> is a matrix with a special forward pass: instead of matrix multiply, it does a <strong>row lookup</strong>. Give it an integer, get back that row. That is the entire operation — no computation, pure lookup.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — the embedding matrix</span></div>
+    <div class="visual no-break">
+      <div class="visual-title">wte shape: (50257, 384) = 19.3M learnable parameters</div>
+      <table>
+      <thead><tr><th>Row (token ID)</th><th>Token</th><th>384-dim vector (first 6 shown)</th></tr></thead>
+      <tbody>
+      <tr><td class="td-mono">0</td><td>"!"</td><td style="font-family:var(--mono);font-size:.73rem">[ 0.12, −0.45,  0.33,  0.71, −0.22,  0.08, …]</td></tr>
+      <tr><td class="td-mono">257</td><td>" " (space)</td><td style="font-family:var(--mono);font-size:.73rem">[ 0.02,  0.11, −0.03,  0.05,  0.01, −0.09, …]</td></tr>
+      <tr style="background:var(--pt-bg)"><td class="td-mono"><strong>2746</strong></td><td><strong>"model"</strong></td><td style="font-family:var(--mono);font-size:.73rem"><strong>[ 0.21, −0.54,  0.88,  0.33, −0.71,  0.42, …]  ← idx=2746 returns this row</strong></td></tr>
+      <tr><td class="td-mono">15496</td><td>"Hello"</td><td style="font-family:var(--mono);font-size:.73rem">[ 0.55,  0.23, −0.18,  0.62,  0.31, −0.44, …]</td></tr>
+      <tr><td class="td-mono">50256</td><td>&lt;EOT&gt;</td><td style="font-family:var(--mono);font-size:.73rem">[−0.31,  0.07,  0.55, −0.88,  0.14,  0.66, …]</td></tr>
+      </tbody>
+      </table>
+    </div>
+    <p>The 384 numbers are <em>static</em> embeddings — "bank" always maps to the same row regardless of context ("river bank" or "bank deposit"). The transformer blocks above transform it into a context-specific vector. The embedding table is the starting point, not the final answer.</p>
+    <p>After training: <code>"cat"</code> and <code>"dog"</code> are nearby in 384-dim space. Mathematical relationships emerge: <code>king − man + woman ≈ queen</code>. These are not programmed in — they fall out of the geometry that training creates.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">Implementation</span></div>
+<pre>self.wte = nn.Embedding(config.vocab_size, config.n_embd)  <span class="ptag">PT</span>
+<span class="cc"># Creates matrix of shape (50257, 384)
+# Initialised randomly — every value learned during training
+# 50257 × 384 = 19.3M learnable parameters
+
+# Forward pass — called automatically as self.wte(idx):</span>
+tok_emb = self.wte(idx)   <span class="ptag">PT</span>
+<span class="cc"># idx:     (B, T)       int64  — token IDs
+# tok_emb: (B, T, 384)  float  — one row per token ID
+# Internally: for each integer in idx, return embedding_matrix[integer]
+# No matrix multiply. Pure lookup. Very fast.</span></pre>
+  </div>
+</div>
+
+<h2>2.3 — Positional encoding (wpe)</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><span class="layer-label">Why we need it</span></div>
+    <p>Self-attention processes all tokens simultaneously — it has no built-in sense of order. Without positional encoding, "cat bit dog" and "dog bit cat" produce <em>identical</em> attention patterns. The model literally cannot tell which word came first.</p>
+    <div class="visual">
+      <div class="visual-title">Why not just add position numbers?</div>
+      <table>
+      <thead><tr><th>Option</th><th>Approach</th><th>Problem</th></tr></thead>
+      <tbody>
+      <tr><td>A — raw numbers</td><td>pos 2 → x + 2 = [0.25+2, …]</td><td>Values explode at pos 100+</td></tr>
+      <tr><td>B — normalise 0–1</td><td>pos 2 in 10-word = 0.20, in 100-word = 0.02</td><td>Same position, different value</td></tr>
+      <tr class="row-win"><td><strong>C — learned vectors ✓</strong></td><td>One 384-dim vector per position, trained</td><td>Stable, consistent, simple</td></tr>
+      </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">wpe + combining with wte</span></div>
+<pre>self.wpe = nn.Embedding(config.block_size, config.n_embd)   <span class="ptag">PT</span>
+<span class="cc"># shape: (1024, 384) — one row per position in context window
+# ~393K parameters — much smaller than wte's 19.3M
+# Row 0 = "I am the first token"  Row 1023 = "I am the 1024th token"
+
+# Sinusoidal vs learned PE: original 2017 Transformer used fixed sine/cosine
+# nanochat/GPT-2 uses learned PE — simpler, equally effective</span>
+
+pos     = torch.arange(T, device=idx.device)    <span class="ptag">PT</span>  <span class="cc"># (T,) → [0,1,2,…,T-1]</span>
+pos_emb = self.wpe(pos)                         <span class="ptag">PT</span>  <span class="cc"># (T, 384)</span>
+
+<span class="cc"># Element-wise addition — combines token meaning + position info:</span>
+<span class="cc"># wte("The") = [0.11, -0.33,  0.55, …]   ← what "The" means</span>
+<span class="cc"># wpe(pos=0) = [0.14,  0.99,  0.28, …]   ← "I am first position"</span>
+<span class="cc">#              ──────────────────────────</span>
+<span class="cc"># sum        = [0.25,  0.66,  0.83, …]   ← "The" at position 0 ✓</span>
+
+x = self.transformer.drop(tok_emb + pos_emb)   <span class="ptag">PT</span>
+<span class="cc"># tok_emb: (B, T, 384)  pos_emb: (T, 384)
+# Broadcasting: PyTorch auto-expands pos_emb across the B dimension
+# Same positional vector for every sentence in the batch — correct!
+# PE is added ONCE here. Persists through all 6 blocks via residuals. Never re-added.</span></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><span class="layer-label">Key insight — broadcasting</span></div>
+    <div class="callout c-purple">
+      <strong>How (T, 384) adds to (B, T, 384)</strong>
+      tok_emb is (B, T, 384) but pos_emb is only (T, 384). PyTorch's broadcasting rule auto-expands pos_emb to (B, T, 384) — the same positional vector is added to every item in the batch. This is correct: position 0 means the same thing in every sentence. One GPU operation, no Python loop.
+    </div>
+  </div>
+</div>
+
+<h2>2.4 — Inside every transformer block</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — the two-half structure</span></div>
+    <div class="g2">
+      <div class="card" style="border-top:2.5px solid var(--purple)">
+        <div class="card-title" style="color:var(--purple)">Half 1 — Attention sublayer</div>
+        <div class="card-body" style="font-family:var(--mono);font-size:.75rem;line-height:2">
+          LayerNorm(384) <span class="pt">PT</span><br>↓<br>
+          CausalSelfAttention <span class="nc">NC</span><br>↓<br>
+          x = x + attn_output &nbsp;<em style="font-family:var(--sans)">residual connection</em>
+        </div>
+      </div>
+      <div class="card" style="border-top:2.5px solid var(--green)">
+        <div class="card-title" style="color:var(--green)">Half 2 — FFN sublayer (plain 2-layer NN!)</div>
+        <div class="card-body" style="font-family:var(--mono);font-size:.75rem;line-height:2">
+          LayerNorm(384) <span class="pt">PT</span><br>↓<br>
+          nn.Linear(384→1536) <span class="pt">PT</span> &nbsp;<em style="font-family:var(--sans)">4× expand</em><br>↓<br>
+          nn.GELU() <span class="pt">PT</span> &nbsp;<em style="font-family:var(--sans)">activation</em><br>↓<br>
+          nn.Linear(1536→384) <span class="pt">PT</span> &nbsp;<em style="font-family:var(--sans)">compress</em><br>↓<br>
+          x = x + ffn_output &nbsp;<em style="font-family:var(--sans)">residual connection</em>
+        </div>
+      </div>
+    </div>
+    <div class="callout c-green">
+      <strong>Shape is preserved through ALL 6 blocks</strong>
+      (B, T, 384) goes in → (B, T, 384) comes out — every single block. Each block enriches meaning without touching dimensions. The 4× FFN expansion (384→1536→384) provides working space for intermediate computation. GELU instead of ReLU: smooth fade near zero gives cleaner gradients for language models.
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">MLP class + complete GPT forward pass</span></div>
+<pre><span class="ck">class</span> MLP(nn.Module):                     <span class="nctag">NC</span>
+    <span class="ck">def</span> __init__(self, config):
+        <span class="ck">super</span>().__init__()                <span class="ptag">PT</span>
+        self.c_fc   = nn.Linear(          <span class="ptag">PT</span>  <span class="cc"># expand: 384 → 1536</span>
+            config.n_embd, 4 * config.n_embd)
+        self.gelu   = nn.GELU()           <span class="ptag">PT</span>  <span class="cc"># activation</span>
+        self.c_proj = nn.Linear(          <span class="ptag">PT</span>  <span class="cc"># compress: 1536 → 384</span>
+            4 * config.n_embd, config.n_embd)
+
+    <span class="ck">def</span> forward(self, x):             <span class="nctag">NC</span>
+        x = self.c_fc(x)              <span class="ptag">PT</span>
+        x = self.gelu(x)              <span class="ptag">PT</span>
+        x = self.c_proj(x)            <span class="ptag">PT</span>
+        <span class="ck">return</span> x
+
+<span class="ck">class</span> GPT(nn.Module):                     <span class="nctag">NC</span>
+    <span class="ck">def</span> forward(self, idx, targets=None):  <span class="nctag">NC</span>
+        B, T = idx.shape                  <span class="nctag">NC</span>
+
+        <span class="cc"># ── Phase 2: embeddings ──────────────────────────────</span>
+        tok_emb = self.transformer.wte(idx)           <span class="ptag">PT</span>  <span class="cc"># (B,T,384)</span>
+        pos     = torch.arange(T, device=idx.device)  <span class="ptag">PT</span>  <span class="cc"># (T,)</span>
+        pos_emb = self.transformer.wpe(pos)           <span class="ptag">PT</span>  <span class="cc"># (T,384)</span>
+        x = self.transformer.drop(tok_emb + pos_emb)  <span class="ptag">PT</span>  <span class="cc"># (B,T,384)</span>
+
+        <span class="cc"># ── Phase 3: transformer blocks ──────────────────────</span>
+        <span class="ck">for</span> block <span class="ck">in</span> self.transformer.h:   <span class="nctag">NC</span>
+            x = block(x)                  <span class="nctag">NC</span>  <span class="cc"># (B,T,384)→(B,T,384)</span>
+        x = self.transformer.ln_f(x)      <span class="ptag">PT</span>  <span class="cc"># final LayerNorm</span>
+
+        <span class="cc"># ── Phase 5: output ──────────────────────────────────</span>
+        logits = self.lm_head(x)          <span class="ptag">PT</span>  <span class="cc"># (B,T,50257)</span>
+        loss = None
+        <span class="ck">if</span> targets <span class="ck">is not None</span>:           <span class="nctag">NC</span>
+            loss = F.cross_entropy(        <span class="ptag">PT</span>
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1))
+        <span class="ck">return</span> logits, loss</pre>
+  </div>
+</div>
+
+<h2>2.5 — LayerNorm, AdamW, and training infrastructure</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — LayerNorm is NOT ±1 clipping</span></div>
+    <div class="visual">
+      <div class="visual-title">LayerNorm on exam scores [20, 40, 60, 80, 100]</div>
+      <div class="g2">
+        <div style="font-family:var(--mono);font-size:.75rem;line-height:2">
+          Step 1 — subtract mean (60):<br>
+          [−40, −20, 0, +20, +40]<br><br>
+          Step 2 — divide by std (28.3):<br>
+          [−1.41, −0.71, 0, +0.71, +1.41]<br><br>
+          Score of 200 → (200−60)/28.3 = <strong>+4.9</strong><br>
+          <em>No clipping — just consistent scale</em>
+        </div>
+        <div style="font-size:.8rem;color:var(--ink2);line-height:1.7">
+          <strong>The benefit is consistency.</strong><br><br>
+          Every vector entering the next sublayer has mean=0 and std=1. Attention weights don't have to cope with values that are sometimes 0.001 and sometimes 1000.<br><br>
+          Training is dramatically more stable. Applied before attention and before FFN in every block (pre-norm pattern).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — SGD → Adam → AdamW</span></div>
+    <div class="g3">
+      <div class="card">
+        <div class="card-title">Plain SGD</div>
+        <div class="card-body">
+          weight = weight − lr × gradient<br><br>
+          One fixed learning rate for all weights. Zigzags in ravines. Can't handle tiny and huge gradients simultaneously.
+        </div>
+      </div>
+      <div class="card" style="background:var(--q-bg);border-color:var(--q-bd)">
+        <div class="card-title" style="color:var(--q-fg)">Adam (2015)</div>
+        <div class="card-body">
+          Tracks <strong>m</strong> (momentum) and <strong>v</strong> (variance) per weight.<br><br>
+          update = lr × m / (√v + ε)<br><br>
+          Every weight gets its own adaptive learning rate. <strong>Bug:</strong> weight decay gets rescaled by √v — loses effect.
+        </div>
+      </div>
+      <div class="card card-k">
+        <div class="card-title">AdamW (2017) ← nanochat</div>
+        <div class="card-body">
+          Adam + decay applied <em>after</em> gradient update — decoupled.<br><br>
+          weight -= lr × m / (√v + ε)&nbsp;<em>gradient</em><br>
+          weight -= lr × λ × weight &nbsp;&nbsp;&nbsp;<em>decay, clean</em><br><br>
+          Every weight decays by consistent λ × weight regardless of gradient size.
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:10px">
+      <h4>Adam internals — the "m" and "v" trackers</h4>
+      <p style="font-size:.82rem"><strong>m (momentum / exp_avg):</strong> Running average of recent gradient <em>directions</em>. β₁=0.9 means "90% old direction + 10% new gradient." Acts like a heavy ball — smooths noise, doesn't stop instantly at small bumps.</p>
+      <p style="font-size:.82rem"><strong>v (variance / exp_avg_sq):</strong> Running average of recent gradient <em>magnitudes squared</em>. β₂=0.95 means "95% old size + 5% new gradient²." Tracks volatility.</p>
+      <p style="font-size:.82rem"><strong>The automatic gearbox:</strong> Dividing by √v gives each weight its own effective step size. Neglected weight (tiny v) → large step (gets a push). Exploding weight (huge v) → tiny step (moves cautiously). You never manually tune per-layer learning rates.</p>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">AdamW + training loop</span></div>
+<pre><span class="cc"># AdamW parameter groups — weight matrices decay, biases/LayerNorm don't</span>
+decay_params    = [p <span class="ck">for</span> n,p <span class="ck">in</span> model.named_parameters() <span class="ck">if</span> p.dim() >= 2]  <span class="nctag">NC</span>
+no_decay_params = [p <span class="ck">for</span> n,p <span class="ck">in</span> model.named_parameters() <span class="ck">if</span> p.dim() < 2]   <span class="nctag">NC</span>
+
+optimizer = torch.optim.AdamW([                             <span class="ptag">PT</span>
+    {<span class="cs">'params'</span>: decay_params,    <span class="cs">'weight_decay'</span>: 0.1},
+    {<span class="cs">'params'</span>: no_decay_params, <span class="cs">'weight_decay'</span>: 0.0},
+], lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+
+<span class="cc"># The complete training loop:</span>
+<span class="ck">for</span> step <span class="ck">in</span> range(max_iters):                                  <span class="nctag">NC</span>
+    optimizer.zero_grad(set_to_none=True)                     <span class="ptag">PT</span>  <span class="cc"># 1. clear grads</span>
+    logits, loss = model(x, y)                                <span class="nctag">NC</span>  <span class="cc"># 2. forward</span>
+    loss.backward()                                           <span class="ptag">PT</span>  <span class="cc"># 3. backward</span>
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)   <span class="ptag">PT</span>  <span class="cc"># 4. clip</span>
+    optimizer.step()                                          <span class="ptag">PT</span>  <span class="cc"># 5. update</span>
+    <span class="cc"># step() does per weight:
+    #   m = 0.9×m + 0.1×grad           (momentum)
+    #   v = 0.95×v + 0.05×grad²        (variance)
+    #   weight -= lr × m/(√v + 1e-8)   (adaptive update)
+    #   weight -= lr × 0.1 × weight    (weight decay, decoupled)</span></pre>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-key">★</div><span class="layer-label">AdamW parameters + memory cost</span></div>
+    <table class="no-break">
+    <thead><tr><th>Symbol</th><th>PyTorch arg</th><th>nanochat value</th><th>Role</th></tr></thead>
+    <tbody>
+    <tr><td class="td-mono">lr</td><td>lr</td><td>3e-4</td><td>Base step size — most sensitive hyperparameter</td></tr>
+    <tr><td class="td-mono">β₁</td><td>betas[0]</td><td>0.9</td><td>Momentum: 90% old direction + 10% new gradient (exp_avg)</td></tr>
+    <tr><td class="td-mono">β₂</td><td>betas[1]</td><td>0.95</td><td>Variance: 95% old size + 5% new gradient² (exp_avg_sq)</td></tr>
+    <tr><td class="td-mono">λ</td><td>weight_decay</td><td>0.1</td><td>Forgetting pressure — pushes weights toward zero</td></tr>
+    <tr><td class="td-mono">ε</td><td>eps</td><td>1e-8</td><td>Prevents division by zero in √v + ε</td></tr>
+    </tbody>
+    </table>
+    <div class="callout c-warn">
+      <strong>The 4× memory cost of Adam — why training LLMs is expensive</strong>
+      For every weight: store (1) the weight, (2) gradient, (3) m, (4) v = 4× model size in VRAM.<br>
+      7B model at float32: 7B × 4 × 4 bytes = <strong>112 GB</strong> just to hold training state.<br>
+      Solutions: bfloat16 precision (÷2), 8-bit optimisers (÷4 for m and v), ZeRO sharding across GPUs.<br>
+      nanochat at 10–85M params: fits comfortably under 2 GB.
+    </div>
+    <div class="callout c-note">
+      <strong>Gradient clipping — the speed limiter</strong>
+      Between loss.backward() and optimizer.step(): <code>clip_grad_norm_(params, max_norm=1.0)</code><br>
+      If gradient vector magnitude exceeds 1.0, scale everything down proportionally. Direction preserved. Magnitude tamed. Prevents one bad batch from destroying weeks of training.
+    </div>
+  </div>
+</div>
+
+<h3>Phase 2 — Key takeaways</h3>
+<div class="callout c-green no-break">
+  <strong>What Phase 2 actually taught</strong>
+  <ol style="margin:6px 0 0 22px;padding:0;font-size:.86rem;line-height:1.7">
+    <li><strong>Embedding = learnable lookup</strong> &mdash; <code>nn.Embedding</code> is a matrix; integer <code>i</code> selects row <code>i</code>. No matrix multiply happens at lookup time.</li>
+    <li><strong>Two embeddings, added element-wise.</strong> Token (<code>wte</code>) says <em>what</em> the token is; position (<code>wpe</code>) says <em>where</em> it sits. <code>x = wte(idx) + wpe(pos)</code> gives each token a unique "word + position" signature.</li>
+    <li><strong>LayerNorm normalises per vector, not per batch.</strong> Mean 0, std 1 along the feature dim. Re-scales with learnable γ, β. It stabilises training; it does <em>not</em> clip to ±1.</li>
+    <li><strong>The transformer block is one residual pass twice.</strong> <code>x = x + Attention(LN(x))</code>, then <code>x = x + MLP(LN(x))</code>. Skip connections keep gradients alive across depth.</li>
+    <li><strong>AdamW is Adam + decoupled weight decay.</strong> Per-parameter adaptive learning rates, momentum over past gradients, L2 penalty applied separately. Standard for LLM training.</li>
+    <li><strong>Gradient clipping is the seat belt.</strong> <code>clip_grad_norm_</code> keeps one bad batch from blowing up weeks of training.</li>
+  </ol>
+</div>
+
+<div class="section-break"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     PHASE 3 — CAUSAL SELF-ATTENTION
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">Phase 3</span>
+  <div>
+    <div class="phase-title">Causal Self-Attention</div>
+    <div class="phase-sub">The heart of the transformer — how tokens attend to each other</div>
+  </div>
+</div>
+
+<p>This is the most important phase in the build. Everything before it was setup. The transformer's power comes entirely from what happens here: every token looks at every other token, scores how relevant each one is, and uses those scores to pull in information from across the sequence.</p>
+
+<h2>3.1 — Q, K, V Projections</h2>
+
+<div class="concept">
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-why">?</div><span class="layer-label">Why three matrices? Why not compare embeddings directly?</span></div>
+    <p>The token embedding already carries 384 numbers describing the token. Why not just compare those directly? Because the embedding carries <em>everything</em> about a token at once. You need three specialised, separate views of it — each answering a different question, via three separate learned weight matrices.</p>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — Q, K, V roles</span></div>
+    <div class="g3">
+      <div class="card card-q">
+        <div class="card-title">Q — Query</div>
+        <div class="card-body">
+          "What am I looking for?"<br><br>
+          The question a token is asking. Scored against every other token's Key to produce attention scores. Determines how much each other token is attended to.
+        </div>
+      </div>
+      <div class="card card-k">
+        <div class="card-title">K — Key</div>
+        <div class="card-body">
+          "What do I advertise I contain?"<br><br>
+          The catalogue label. Matched against Queries. <strong>K determines whether a token gets attended to.</strong> Can be highly findable (strong K) while sharing something different in V.
+        </div>
+      </div>
+      <div class="card card-v">
+        <div class="card-title">V — Value</div>
+        <div class="card-body">
+          "What do I actually give away?"<br><br>
+          Content retrieved when attention is high. <strong>V determines what flows</strong> when a token is attended to. Completely separate from K — this is why the model can learn nuanced retrieval patterns.
+        </div>
+      </div>
+    </div>
+    <div class="callout c-key">
+      <strong>The library analogy</strong>
+      You are the Query (searching "books about cats"). Each book's catalogue entry is a Key. The score = how well your query matches each key. The actual pages you read = the Value. A beautifully written book (high V) with a terrible catalogue entry (low K) will never be found. Q, K, V are separate for exactly this reason.
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — projection dimensions + the fused trick</span></div>
+    <div class="visual">
+      <div class="visual-title">For a single token embedding x of shape (384,)</div>
+      <div style="font-family:var(--mono);font-size:.78rem;line-height:2.2;margin-bottom:8px">
+        x (384) × W_Q (384 × 64) = Q (64) &nbsp;&nbsp;&nbsp;← query for this token<br>
+        x (384) × W_K (384 × 64) = K (64) &nbsp;&nbsp;&nbsp;← key for this token<br>
+        x (384) × W_V (384 × 64) = V (64) &nbsp;&nbsp;&nbsp;← value for this token<br><br>
+        head_dim = n_embd // n_head = 384 // 6 = <strong>64</strong>
+      </div>
+      <div class="callout c-note" style="margin-top:0">
+        <strong>nanochat fuses all three into one matrix (efficiency)</strong>
+        Instead of 3 separate matmuls: <code>self.c_attn = nn.Linear(384, 3×384, bias=False)</code> <span class="pt">PT</span><br>
+        One big multiply → (B, T, 1152) → <code>.split(384, dim=2)</code> → q, k, v each (B, T, 384)<br>
+        GPUs prefer large parallel operations. One matmul is faster than three small ones. Conceptually identical.
+      </div>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — .view() and .transpose() — the head split</span></div>
+    <div class="visual no-break">
+      <div class="visual-title">Splitting (B, T, 384) into 6 heads of 64 dims — two mandatory steps</div>
+      <div style="font-family:var(--mono);font-size:.75rem;line-height:2.2;margin-bottom:12px">
+        Start:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; (B, T, 384)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  ← 384 flat dims, heads mixed together<br>
+        .view(B,T,6,64)&nbsp;  (B, T, 6, 64)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← heads labelled, 3D→4D, no data copy<br>
+        .transpose(1,2)&nbsp;  (B, 6, T, 64)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← heads moved to dim 1 for batched matmul
+      </div>
+
+      <div class="g2" style="margin-bottom:10px">
+        <div>
+          <div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink4);margin-bottom:6px">.view() — relabelling, no data copy</div>
+          <div style="font-size:.75rem;color:var(--ink2);line-height:1.6">
+            Like drawing dividing lines on a strip of paper. The 384 numbers are already in memory in a flat block. .view(B, T, 6, 64) just says "interpret the last dim as 6 groups of 64." Zero data movement. Instant.
+          </div>
+        </div>
+        <div>
+          <div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink4);margin-bottom:6px">.transpose(1,2) — move heads to dim 1</div>
+          <div style="font-size:.75rem;color:var(--ink2);line-height:1.6">
+            Swaps dim 1 (T) and dim 2 (n_head). After this, heads sit in dim 1 — exactly where PyTorch's batched matmul expects them. All 6 heads then run as a batch: (B × 6) independent operations in parallel.
+          </div>
+        </div>
+      </div>
+
+      <div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink4);margin-bottom:6px">After the split — each head independently sees its 64-dim slice</div>
+      <div class="g3" style="gap:6px">
+        <div class="card card-q" style="padding:8px 10px"><div class="card-body">Head 0: q[b,0,:,:] → (T, 64)<br>dims 0–63</div></div>
+        <div class="card card-k" style="padding:8px 10px"><div class="card-body">Head 1: q[b,1,:,:] → (T, 64)<br>dims 64–127</div></div>
+        <div class="card card-v" style="padding:8px 10px"><div class="card-body">Head 2: q[b,2,:,:] → (T, 64)<br>dims 128–191</div></div>
+        <div class="card" style="padding:8px 10px;border-top:2px solid var(--blue);background:var(--pt-bg)"><div class="card-body">Head 3: q[b,3,:,:] → (T, 64)<br>dims 192–255</div></div>
+        <div class="card" style="padding:8px 10px;border-top:2px solid var(--accent);background:#fef0ec"><div class="card-body">Head 4: q[b,4,:,:] → (T, 64)<br>dims 256–319</div></div>
+        <div class="card" style="padding:8px 10px"><div class="card-body">Head 5: q[b,5,:,:] → (T, 64)<br>dims 320–383</div></div>
+      </div>
+    </div>
+    <div class="callout c-purple">
+      <strong>Why two steps are mandatory — not one</strong>
+      .view() reads memory strictly left-to-right. It must come first to correctly label which 64 dims belong to which head. Only after correct labelling can .transpose() safely reorder dimensions. Jumping straight to .view(B, 6, T, 64) would scramble which data each head sees — wrong results, no error thrown.
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-visual">▦</div><span class="layer-label">Visual — q @ k.transpose(-2,-1) — the attention score computation</span></div>
+    <div class="g2">
+      <div>
+        <div class="visual">
+          <div class="visual-title">Why transpose k? (inner dims must match)</div>
+          <div style="font-family:var(--mono);font-size:.73rem;line-height:2">
+            q: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; (B, 6, T, <strong>64</strong>)<br>
+            k (wrong): &nbsp;(B, 6, T, 64) &nbsp; ← 64≠T ✗<br>
+            k.T(-2,-1): (B, 6, <strong>64</strong>, T) &nbsp; ← 64=64 ✓<br><br>
+            result:&nbsp;&nbsp;&nbsp;&nbsp; (B, 6, T, T) &nbsp; ← 64 cancels<br>
+            att[b,h,i,j] = how much token i<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;attends to token j
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="visual">
+          <div class="visual-title">Concrete dot product (head_dim=3)</div>
+          <div style="font-family:var(--mono);font-size:.73rem;line-height:1.8">
+            Q_sat = [0.1, &nbsp;0.8, &nbsp;0.4]<br>
+            K_cat = [0.8, &nbsp;0.3, &nbsp;0.5]<br><br>
+            score =<br>
+            &nbsp;&nbsp;(0.1×0.8) + (0.8×0.3) + (0.4×0.5)<br>
+            = &nbsp;&nbsp;0.08&nbsp;&nbsp;&nbsp; + &nbsp;&nbsp;0.24&nbsp;&nbsp;&nbsp; + &nbsp;&nbsp;0.20<br>
+            = <strong>0.52</strong> ← "sat" attends to "cat" ✓<br><br>
+            score(sat→The) = 0.20 ← less attention ✓
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="concept-layer">
+    <div class="layer-header"><div class="layer-icon li-code">{ }</div><span class="layer-label">CausalSelfAttention.__init__ — fully annotated</span></div>
+<pre><span class="ck">class</span> CausalSelfAttention(nn.Module):              <span class="nctag">NC</span>
+    <span class="ck">def</span> __init__(self, config):
+        <span class="ck">super</span>().__init__()                         <span class="ptag">PT</span>
+        assert config.n_embd % config.n_head == 0  <span class="nctag">NC</span>  <span class="cc"># head_dim must be integer</span>
+
+        self.c_attn = nn.Linear(                   <span class="ptag">PT</span>  <span class="cc"># fused Q+K+V — all heads at once</span>
+            config.n_embd, 3 * config.n_embd, bias=False
+        )                                              <span class="cc"># (384, 1152)</span>
+
+        self.c_proj = nn.Linear(                   <span class="ptag">PT</span>  <span class="cc"># output: recombines all heads</span>
+            config.n_embd, config.n_embd, bias=False
+        )                                              <span class="cc"># (384, 384)</span>
+
+        self.attn_dropout  = nn.Dropout(config.dropout)  <span class="ptag">PT</span>
+        self.resid_dropout = nn.Dropout(config.dropout)  <span class="ptag">PT</span>
+        self.n_head = config.n_head    <span class="cc"># 6</span>           <span class="nctag">NC</span>
+        self.n_embd = config.n_embd    <span class="cc"># 384</span>         <span class="nctag">NC</span>
+
+        self.register_buffer(<span class="cs">'bias'</span>,               <span class="ptag">PT</span>  <span class="cc"># causal mask — not a parameter</span>
+            torch.tril(torch.ones(config.block_size, config.block_size))
+            .view(1, 1, config.block_size, config.block_size)
+        )
+        <span class="cc"># bias shape: (1, 1, 1024, 1024)
+        # (1, 1, ...) broadcasts across B and n_head
+        # 1s below diagonal = allowed to attend
+        # 0s above diagonal = masked to -inf before softmax</span></pre>
+  </div>
+</div>
+
+<h2>★ The Complete Dimension Trace</h2>
+<p>Every shape change from raw token IDs all the way to attention scores — nothing skipped. The highlighted row is the dimension that is <strong style="color:var(--accent)">new</strong> at each step.</p>
+
+<div class="dim-trace no-break">
+  <div class="dim-head">
+    <div class="dim-cell">Step</div>
+    <div class="dim-cell">Operation</div>
+    <div class="dim-cell">Shape</div>
+    <div class="dim-cell">Notes</div>
+  </div>
+  <div class="dim-row">
+    <div class="dim-cell dim-step">0</div>
+    <div class="dim-cell dim-op">get_batch() <span class="nc">NC</span></div>
+    <div class="dim-cell dim-shape">(B, T)</div>
+    <div class="dim-cell dim-note">(12, 1024) int64 — raw token IDs from train.bin</div>
+  </div>
+  <div class="dim-row dr-p2">
+    <div class="dim-cell dim-step">1</div>
+    <div class="dim-cell dim-op">wte(idx) <span class="pt">PT</span></div>
+    <div class="dim-cell dim-shape">(B, T, <span class="dim-new">C</span>)</div>
+    <div class="dim-cell dim-note">(12, 1024, <span class="dim-new">384</span>) — C appears! 2D → 3D. Each integer → 384 floats</div>
+  </div>
+  <div class="dim-row">
+    <div class="dim-cell dim-step">2</div>
+    <div class="dim-cell dim-op">+ wpe(pos) <span class="pt">PT</span></div>
+    <div class="dim-cell dim-shape">(B, T, C)</div>
+    <div class="dim-cell dim-note">(12, 1024, 384) — shape unchanged, position added via broadcasting</div>
+  </div>
+  <div class="dim-row dr-p3">
+    <div class="dim-cell dim-step">3</div>
+    <div class="dim-cell dim-op">c_attn(x) <span class="pt">PT</span></div>
+    <div class="dim-cell dim-shape">(B, T, <span class="dim-new">3C</span>)</div>
+    <div class="dim-cell dim-note">(12, 1024, <span class="dim-new">1152</span>) — Q+K+V fused. C triples temporarily</div>
+  </div>
+  <div class="dim-row">
+    <div class="dim-cell dim-step">4</div>
+    <div class="dim-cell dim-op">.split(384, dim=2) <span class="pt">PT</span></div>
+    <div class="dim-cell dim-shape">q,k,v: (B, T, C)</div>
+    <div class="dim-cell dim-note">(12, 1024, 384) × 3 tensors — separated but heads still mixed in C</div>
+  </div>
+  <div class="dim-row dr-p2">
+    <div class="dim-cell dim-step">5</div>
+    <div class="dim-cell dim-op">.view(B,T,6,64) <span class="pt">PT</span></div>
+    <div class="dim-cell dim-shape">(B, T, <span class="dim-new">n_h</span>, <span class="dim-new">d_h</span>)</div>
+    <div class="dim-cell dim-note">(12, 1024, <span class="dim-new">6</span>, <span class="dim-new">64</span>) — 4D! Heads labelled. Zero data copy.</div>
+  </div>
+  <div class="dim-row dr-p3">
+    <div class="dim-cell dim-step">6</div>
+    <div class="dim-cell dim-op">.transpose(1,2) <span class="pt">PT</span></div>
+    <div class="dim-cell dim-shape">(B, <span class="dim-new">n_h</span>, T, d_h)</div>
+    <div class="dim-cell dim-note">(12, <span class="dim-new">6</span>, 1024, 64) — heads moved to dim 1 for batched matmul</div>
+  </div>
+  <div class="dim-row dr-final">
+    <div class="dim-cell dim-step">7 ★</div>
+    <div class="dim-cell dim-op">q @ k.T(-2,-1) <span class="pt">PT</span></div>
+    <div class="dim-cell dim-shape">(B, n_h, T, <span class="dim-new">T</span>)</div>
+    <div class="dim-cell dim-note">(12, 6, 1024, <span class="dim-new">1024</span>) — 64 cancels. 75M scores! One per token pair per head.</div>
+  </div>
+</div>
+
+<div class="callout c-warn">
+  <strong>Three moments a new dimension appears</strong>
+  Step 1: wte adds C=384 → tensor goes 2D→3D &nbsp;·&nbsp;
+  Step 5: .view() adds n_head and head_dim → tensor goes 3D→4D &nbsp;·&nbsp;
+  Step 7: matmul adds second T → 64 dims cancel and become T×T scores
+</div>
+<div class="callout c-warn">
+  <strong>Attention is quadratic in T — the fundamental bottleneck</strong>
+  The (T, T) score matrix grows with T². At T=1024: 75,497,472 numbers just for raw scores (before mask and softmax). Double the context window → 4× the attention memory. This is why context window length is the primary VRAM bottleneck in LLM training and why long-context models are expensive.
+</div>
+
+<h3>Phase 3.1 — Key takeaways</h3>
+<div class="callout c-green no-break">
+  <strong>The Q/K/V projection step in six bullets</strong>
+  <ol style="margin:6px 0 0 22px;padding:0;font-size:.86rem;line-height:1.7">
+    <li><strong>Q, K, V come from the same <code>x</code>.</strong> Three learned linear projections of the same input produce three interpretations: Q (asking), K (advertising), V (offering).</li>
+    <li><strong>One fused <code>nn.Linear(C, 3C)</code> is the trick.</strong> Project to 3C in one matmul, then <code>.split(C, dim=-1)</code> into q, k, v &mdash; fewer kernel launches than three separate Linears.</li>
+    <li><strong>Heads are a <code>.view()</code>, not extra parameters.</strong> <code>(B, T, C)</code> becomes <code>(B, T, n_head, head_dim)</code> by reshaping memory. <code>C = n_head × head_dim</code> by construction.</li>
+    <li><strong><code>.transpose(1, 2)</code> moves heads to the batch dimension.</strong> <code>(B, T, n_head, head_dim)</code> → <code>(B, n_head, T, head_dim)</code>. Now every head×batch pair runs as an independent matmul on the GPU.</li>
+    <li><strong>Attention is <code>Q @ Kᵀ / √d</code>.</strong> The transpose puts K into the shape that lets every query compare against every key at once. √d keeps scores in a range softmax can handle.</li>
+    <li><strong>The (T, T) score matrix is the bottleneck.</strong> Memory grows with T². Doubling the context window quadruples attention memory — the reason long-context LLMs are expensive.</li>
+  </ol>
+</div>
+
+<div class="callout c-note no-break">
+  <strong>Current stopping point — you are here</strong>
+  Phases 1, 2, and 3.1 complete. Next up: 3.2 attention scores + causal mask, 3.3 softmax + value aggregation, 3.4 multi-head concat and output projection — then Phase 4 (training loop) and Phase 5 (generation / sampling).
+</div>
+
+<div class="section-break"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     PYTORCH QUICK REFERENCE
+══════════════════════════════════════════════════════════════ -->
+<div class="phase-header">
+  <span class="phase-num">Reference</span>
+  <div>
+    <div class="phase-title">PyTorch Built-ins Cheat Sheet</div>
+    <div class="phase-sub">Every [PT] built-in used in nanochat — one line each</div>
+  </div>
+</div>
+
+<table class="no-break">
+<thead><tr><th>API</th><th>What it does</th><th>Phase</th></tr></thead>
+<tbody>
+<tr><td class="td-mono">torch.tensor(data, dtype=)</td><td>Convert Python list/array to tensor</td><td>1</td></tr>
+<tr><td class="td-mono">torch.randint(high, size)</td><td>Random integers — batch sampling start positions</td><td>1</td></tr>
+<tr><td class="td-mono">torch.stack([t1, t2, …])</td><td>Stack list of 1D tensors into a 2D matrix</td><td>1</td></tr>
+<tr><td class="td-mono">torch.from_numpy(arr)</td><td>Convert numpy array to tensor (shares memory)</td><td>1</td></tr>
+<tr><td class="td-mono">.to(device)</td><td>Move tensor to CPU or GPU</td><td>1</td></tr>
+<tr><td class="td-mono">nn.Embedding(num, dim)</td><td>Lookup table: integer → row of weight matrix. No multiply.</td><td>2</td></tr>
+<tr><td class="td-mono">nn.Linear(in, out, bias=)</td><td>Fully-connected layer: y = xWᵀ + b</td><td>2</td></tr>
+<tr><td class="td-mono">nn.Dropout(p)</td><td>Zero random p fraction of values during training. Auto-off at eval.</td><td>2</td></tr>
+<tr><td class="td-mono">nn.ModuleDict(dict)</td><td>Named dict of layers — all tracked as trainable parameters</td><td>2</td></tr>
+<tr><td class="td-mono">nn.ModuleList([…])</td><td>Ordered list of layers — all tracked as trainable parameters</td><td>2</td></tr>
+<tr><td class="td-mono">nn.LayerNorm(dim)</td><td>Normalise to mean=0, std=1 per vector. NOT ±1 clipping.</td><td>2</td></tr>
+<tr><td class="td-mono">nn.GELU()</td><td>Smooth activation — like ReLU but fades near 0. Better gradients.</td><td>2</td></tr>
+<tr><td class="td-mono">torch.arange(n, device=)</td><td>Create tensor [0, 1, 2, …, n-1]. Used for position indices.</td><td>2</td></tr>
+<tr><td class="td-mono">torch.optim.AdamW(…)</td><td>Optimiser: Adam + decoupled weight decay. Standard for LLMs.</td><td>2</td></tr>
+<tr><td class="td-mono">clip_grad_norm_(params, max)</td><td>Cap gradient vector magnitude. Prevents catastrophic updates.</td><td>2</td></tr>
+<tr><td class="td-mono">F.cross_entropy(logits, tgts)</td><td>Loss: log-softmax + negate, fused and numerically stable.</td><td>Arch</td></tr>
+<tr><td class="td-mono">F.softmax(x, dim=)</td><td>Convert logits to probabilities summing to exactly 1.0</td><td>Arch</td></tr>
+<tr><td class="td-mono">probs.argmax(dim=)</td><td>Index of highest value — greedy deterministic decoding</td><td>Arch</td></tr>
+<tr><td class="td-mono">torch.multinomial(probs, n)</td><td>Sample index weighted by probabilities — creative generation</td><td>Arch</td></tr>
+<tr><td class="td-mono">torch.cat([t1, t2], dim=)</td><td>Concatenate tensors along a dimension</td><td>Arch</td></tr>
+<tr><td class="td-mono">torch.tril(ones(T, T))</td><td>Lower triangular matrix of 1s — the causal mask</td><td>Arch</td></tr>
+<tr><td class="td-mono">register_buffer(name, tensor)</td><td>Save tensor with model but not as a trainable parameter</td><td>Arch</td></tr>
+<tr><td class="td-mono">tensor.view(*shape)</td><td>Reshape without copying. Relabels memory layout. 3D→4D for heads.</td><td>3.1</td></tr>
+<tr><td class="td-mono">tensor.transpose(dim_a, dim_b)</td><td>Swap two dimensions. Moves heads from dim 2 to dim 1.</td><td>3.1</td></tr>
+<tr><td class="td-mono">tensor.split(size, dim)</td><td>Split tensor into equal chunks. Splits 1152 → q, k, v of 384 each.</td><td>3.1</td></tr>
+<tr><td class="td-mono">@ / torch.matmul(a, b)</td><td>Batched matrix multiply. All B×n_head pairs run in parallel on GPU.</td><td>3.1</td></tr>
+<tr><td class="td-mono">torch.no_grad()</td><td>Disable gradient tracking. Faster inference and eval.</td><td>5</td></tr>
+<tr><td class="td-mono">model.train() / model.eval()</td><td>Toggle dropout on/off. Always call eval() before generating.</td><td>5</td></tr>
+<tr><td class="td-mono">torch.save(obj, path)</td><td>Save checkpoint dict to disk</td><td>5</td></tr>
+<tr><td class="td-mono">torch.load(path, map_location=)</td><td>Load checkpoint. map_location='cpu' handles GPU→CPU.</td><td>5</td></tr>
+<tr><td class="td-mono">torch.amp.autocast(dtype=)</td><td>Mixed precision — run forward in bfloat16 for 2-3× speedup.</td><td>5</td></tr>
+<tr><td class="td-mono">torch.compile(model)</td><td>JIT compile via Triton. 30-50% speedup. PyTorch 2.0+.</td><td>5</td></tr>
+</tbody>
+</table>
+
+<div class="section-break"></div>
+
+<div style="text-align:center;padding:28px;background:var(--paper2);border:.5px solid var(--rule);border-radius:10px">
+  <div style="font-family:var(--serif);font-size:1.3rem;font-weight:700;margin-bottom:6px">nanochat Learning Journal</div>
+  <div style="font-family:var(--mono);font-size:.72rem;color:var(--ink4)">Phase 1 — Tokenisation &nbsp;·&nbsp; Phase 2 — Embeddings &nbsp;·&nbsp; Phase 3.1 — Q, K, V Projections</div>
+  <div style="font-size:.72rem;color:var(--ink4);margin-top:8px;font-style:italic">Phases 3.2 → 5 coming: attention scores · causal mask · multi-head · transformer block · training · generation</div>
+</div>
+
+</body>
+</html>
