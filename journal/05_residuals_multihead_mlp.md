@@ -393,6 +393,25 @@ The expansion gives the network room to compute complex intermediate features th
 - Inside `MLP`: `self.c_proj = nn.Linear(1536, 384)` — compresses back from 4× expansion
 - Same name, different classes, different shapes
 
+> **🔧 Actual nanochat** (`gpt.py:129-139`) — Uses `relu^2` instead of GELU, no dropout:
+> ```python
+> class MLP(nn.Module):
+>     def __init__(self, config):
+>         super().__init__()
+>         self.c_fc = Linear(config.n_embd, 4 * config.n_embd, bias=False)
+>         self.c_proj = Linear(4 * config.n_embd, config.n_embd, bias=False)
+>
+>     def forward(self, x):
+>         x = self.c_fc(x)
+>         x = F.relu(x).square()   # relu^2 instead of GELU!
+>         x = self.c_proj(x)
+>         return x
+> ```
+> - **`F.relu(x).square()`** — ReLU followed by squaring. Sparsifies activations more aggressively than GELU (anything negative becomes exactly 0, positives get amplified nonlinearly). Empirically found to match or beat GELU in recent LLM training
+> - **No `self.gelu` module** — the activation is a functional call, not a stored module
+> - **No dropout** — neither after activation nor on the output projection
+> - **`bias=False`** on both linear layers — modern LLMs drop biases throughout
+
 ---
 
 ### The complete transformer Block class
@@ -425,6 +444,25 @@ class Block(nn.Module):                         # [NC]
 6. `x = x + mlp_output` — add the correction. Everything preserved.
 
 The entire block is stacked 6 times in `nn.ModuleList([Block(config) for _ in range(config.n_layer)])` `[PT]`. Input shape = output shape = `(B, T, 384)` at every block. The model deepens without the gradient dying because every `+` sign keeps the highway open.
+
+> **🔧 Actual nanochat** (`gpt.py:142-151`) — Inline RMSNorm, no separate LayerNorm modules, extra args:
+> ```python
+> class Block(nn.Module):
+>     def __init__(self, config, layer_idx):
+>         super().__init__()
+>         self.attn = CausalSelfAttention(config, layer_idx)
+>         self.mlp = MLP(config)
+>
+>     def forward(self, x, ve, cos_sin, window_size, kv_cache):
+>         x = x + self.attn(norm(x), ve, cos_sin, window_size, kv_cache)
+>         x = x + self.mlp(norm(x))
+>         return x
+> ```
+> - **No `self.ln_1` / `self.ln_2`** — uses a bare `norm()` function (RMSNorm) instead of stored `nn.LayerNorm` modules. RMSNorm skips the mean-centering step of LayerNorm, keeping only the magnitude normalisation
+> - **No dropout** on either residual path
+> - **`layer_idx`** passed to attention — used for per-layer sliding window sizes and KV cache indexing
+> - **Extra forward args**: `ve` (value embeddings), `cos_sin` (rotary position encoding), `window_size`, `kv_cache` — all threaded through from the top-level model
+> - The residual pattern `x = x + sublayer(norm(x))` is identical — that core design is unchanged
 
 ---
 
@@ -632,6 +670,57 @@ class CausalSelfAttention(nn.Module):              # [NC]
         return y   # (B, T, 384) — same shape as input x
 ```
 
+> **🔧 Actual nanochat** (`gpt.py:65-126`) — The complete real attention class:
+> ```python
+> class CausalSelfAttention(nn.Module):
+>     def __init__(self, config, layer_idx):
+>         super().__init__()
+>         self.layer_idx = layer_idx
+>         self.n_head = config.n_head
+>         self.n_kv_head = config.n_kv_head
+>         self.n_embd = config.n_embd
+>         self.head_dim = self.n_embd // self.n_head
+>         self.c_q = Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
+>         self.c_k = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+>         self.c_v = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+>         self.c_proj = Linear(self.n_embd, self.n_embd, bias=False)
+>         self.ve_gate_channels = 12
+>         self.ve_gate = Linear(self.ve_gate_channels, self.n_kv_head, bias=False) \
+>             if has_ve(layer_idx, config.n_layer) else None
+>
+>     def forward(self, x, ve, cos_sin, window_size, kv_cache):
+>         B, T, C = x.size()
+>         q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+>         k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
+>         v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
+>         if ve is not None:
+>             ve = ve.view(B, T, self.n_kv_head, self.head_dim)
+>             gate = 3 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))
+>             v = v + gate.unsqueeze(-1) * ve
+>         cos, sin = cos_sin
+>         q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
+>         q, k = norm(q), norm(k)
+>         q = q * 1.2
+>         k = k * 1.2
+>         if kv_cache is None:
+>             y = flash_attn.flash_attn_func(q, k, v, causal=True, window_size=window_size)
+>         else:
+>             k_cache, v_cache = kv_cache.get_layer_cache(self.layer_idx)
+>             y = flash_attn.flash_attn_with_kvcache(q, k_cache, v_cache, k=k, v=v,
+>                 cache_seqlens=kv_cache.cache_seqlens, causal=True, window_size=window_size)
+>             if self.layer_idx == kv_cache.n_layers - 1:
+>                 kv_cache.advance(T)
+>         y = y.contiguous().view(B, T, -1)
+>         y = self.c_proj(y)
+>         return y
+> ```
+> - **Separate Q/K/V projections** (`c_q`, `c_k`, `c_v`) replace fused `c_attn` — enables **grouped-query attention** where `n_kv_head < n_head` (K and V have fewer heads than Q, saving memory)
+> - **No `register_buffer('bias', ...)`** — no stored causal mask; Flash Attention handles masking internally
+> - **No `attn_dropout` or `resid_dropout`** — dropout removed entirely
+> - **`c_proj` applied directly** — `y = self.c_proj(y)` with no dropout wrapper
+> - **Flash Attention** replaces the explicit `q @ k.T`, mask, softmax, `att @ v` pipeline
+> - **Rotary embeddings** + **QK-norm** + **value embeddings** add capabilities not present in the conceptual version
+
 ---
 
 ### Phase 3 — complete key takeaways
@@ -660,5 +749,22 @@ class CausalSelfAttention(nn.Module):              # [NC]
 | `F.softmax(x, dim=-1)` | Convert scores to probabilities summing to 1.0, applied row by row |
 | `tensor.contiguous()` | Force contiguous memory layout — required before .view() after .transpose() |
 | `tensor.masked_fill` | Sets -inf where causal mask is 0 — enforces past-only attention |
+
+> **🔧 Actual nanochat — summary of differences across Phase 3**
+>
+> The conceptual code above teaches the mechanics correctly. Here is what changes in a production-grade implementation like nanochat:
+>
+> | Concept | Conceptual version | Actual nanochat |
+> |---------|-------------------|-----------------|
+> | Q/K/V projection | Fused `c_attn` (one `nn.Linear`) | Separate `c_q`, `c_k`, `c_v` — enables grouped-query attention |
+> | Attention compute | Manual `q @ k.T`, mask, softmax, `att @ v` | `flash_attn.flash_attn_func(q, k, v, causal=True)` — one fused kernel |
+> | Scaling | `* (1/sqrt(d_h))` | QK-norm + fixed scalar 1.2 |
+> | Causal mask | `register_buffer('bias', torch.tril(...))` | `causal=True` flag to Flash Attention |
+> | Position encoding | Learned absolute embeddings | Rotary position embeddings (RoPE) |
+> | Activation | GELU | `F.relu(x).square()` (relu^2) |
+> | Normalisation | `nn.LayerNorm` modules (`ln_1`, `ln_2`) | Inline `norm()` calls (RMSNorm) |
+> | Dropout | `attn_dropout`, `resid_dropout` | None — removed entirely |
+> | Head reassembly | `.transpose(1,2).contiguous().view()` | `.contiguous().view()` — FA3 outputs `(B, T, H, D)` directly |
+> | Extra features | — | Sliding window attention, KV cache, value embeddings, per-layer window patterns |
 
 ---

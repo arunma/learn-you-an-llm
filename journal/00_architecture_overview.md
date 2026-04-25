@@ -63,6 +63,28 @@ These are the only two places `vocab_size` touches the model. Everything in betw
 - **Residual connections** (the curved arrows looping back in the green region) ensure gradients flow cleanly all the way back to the embedding layer during training.
 - **The transformer blocks are the expensive part** — `wte` and `lm_head` are single matrix lookups. The 6 stacked blocks with multi-head attention are where the compute lives.
 
+> **🔧 Actual nanochat** (`nanochat/gpt.py:28-39`)
+>
+> The real GPTConfig differs from the simplified version above:
+
+```python
+@dataclass
+class GPTConfig:
+    sequence_len: int = 2048      # not 1024
+    vocab_size: int = 32768       # not 50,257
+    n_layer: int = 12
+    n_head: int = 6
+    n_kv_head: int = 6            # GQA support — new
+    n_embd: int = 768             # not 384
+    window_pattern: str = "SSSL"  # sliding window — new
+```
+
+- **Larger model**: 768-dim embeddings (not 384), 12 layers (not 6), 2048 context (not 1024)
+- **Smaller vocab**: 32,768 tokens (custom tokeniser) vs GPT-2's 50,257
+- **`n_kv_head`**: enables Grouped Query Attention — keys/values can use fewer heads than queries, saving memory. Here `n_kv_head == n_head` so it's standard MHA, but the plumbing is ready for GQA
+- **`window_pattern`**: controls which layers use sliding-window attention vs full attention (S=sliding, L=long/full). Not present in simplified version
+- **No `dropout` or `block_size` fields** — dropout is removed entirely, context length is called `sequence_len`
+
 ---
 
 ## The Entrance, Exit, and Thinking Style — `wte`, `lm_head`, `n_head`
@@ -172,6 +194,41 @@ The model *learns* what each head specialises in — you don't assign roles manu
    ↓ cross_entropy vs targets (B, T)
 scalar loss    ← single number to minimise during training
 ```
+
+> **🔧 Actual nanochat** (`nanochat/gpt.py:172-175`)
+>
+> The real `wte`, `lm_head`, and shape trace differ from the simplified versions above:
+
+**`wte`** (`gpt.py:172`):
+```python
+"wte": nn.Embedding(padded_vocab_size, config.n_embd),
+```
+- Vocab is **padded to nearest 64** (32,768 → already aligned) for GPU memory efficiency. Tensor cores prefer dimensions divisible by 64.
+
+**`lm_head`** (`gpt.py:175`):
+```python
+self.lm_head = Linear(config.n_embd, padded_vocab_size, bias=False)
+```
+- Uses a custom `Linear` class that casts weights to match input dtype (for mixed-precision training)
+- **Weights are NOT tied** to `wte` — the simplified version mentions weight tying, but nanochat keeps them separate. Untying adds parameters but lets the entrance and exit learn different representations
+
+**Actual shape trace:**
+```
+B=batch_size  T=sequence_len=2048  C=n_embd=768  V=vocab_size=32768
+n_head=6  n_kv_head=6  head_dim=128 (768/6)
+
+(B, T)          ← token IDs
+   ↓ wte
+(B, T, 768)     ← 768-dim vectors (not 384)
+   ↓ × 12 transformer blocks, each with 6 heads of dim 128
+(B, T, 768)     ← contextualised
+   ↓ lm_head
+(B, T, 32768)   ← 32,768 scores (not 50,257)
+   ↓ cross_entropy
+scalar loss
+```
+
+- **`head_dim = 128`** (768 / 6) — double the simplified version's 64. Larger heads = richer per-head representations
 
 ---
 
@@ -319,6 +376,32 @@ idx = torch.cat([idx, next_token], dim=1) # [PT] autoregressive loop
 **The key difference between training and inference:**
 - Training: use all T positions simultaneously, compare against `targets`, compute loss
 - Inference: only use the *last* position's logit (`logits[:, -1, :]`), there are no targets, softmax to pick next token
+
+> **🔧 Actual nanochat** (`nanochat/gpt.py:468-478`)
+>
+> The real logit computation and loss differ from the simplified version above:
+
+**Logit computation** (`gpt.py:468-472`):
+```python
+softcap = 15
+logits = self.lm_head(x)
+logits = logits[..., :self.config.vocab_size]  # remove padding
+logits = logits.float()
+logits = softcap * torch.tanh(logits / softcap)  # squash logits
+```
+- **Padding removal**: `lm_head` outputs `padded_vocab_size` columns but only `vocab_size` are real tokens — the rest are sliced off
+- **Logit softcapping**: `tanh(logits / 15) * 15` squashes all logits into the range `[-15, 15]`. This prevents any single token from dominating with an extreme score. Technique borrowed from Gemma 2 — stabilises training by bounding the logit magnitudes
+- **Cast to float**: ensures loss computation happens in full precision even during mixed-precision training
+
+**Loss** (`gpt.py:474-478`):
+```python
+loss = F.cross_entropy(
+    logits.view(-1, logits.size(-1)), targets.view(-1),
+    ignore_index=-1, reduction=loss_reduction
+)
+```
+- **`ignore_index=-1`**: tokens marked with target `-1` are excluded from the loss. Used for padding tokens or prompt tokens during fine-tuning where you only want to train on the completion
+- **`loss_reduction`**: configurable (e.g., `'mean'` vs `'none'`) — useful for per-token loss analysis or custom training schemes
 
 ---
 

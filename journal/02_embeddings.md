@@ -119,6 +119,22 @@ pos_emb = self.wpe(pos)                        # [PT] → (T, 384)
 
 **Sinusoidal vs learned PE:** The original 2017 Transformer used a fixed sine/cosine formula. nanochat/GPT-2 uses learned PE — vectors initialised randomly and trained like any other parameter. Both approaches work. Learned PE is simpler to implement and equally effective for fixed context lengths.
 
+> **🔧 Actual nanochat** (`gpt.py:197-199`)
+>
+> nanochat does **not** have a `wpe` table. It uses **Rotary Position Embeddings (RoPE)** instead — positional information is injected inside each attention layer by rotating Q and K vectors, not by adding a learned vector to the token embeddings.
+>
+> ```python
+> # In __init__ — precompute rotation matrices once
+> cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
+> self.register_buffer("cos", cos, persistent=False)
+> self.register_buffer("sin", sin, persistent=False)
+> ```
+>
+> - **No `wpe` at all** — no learned positional embedding table, no `pos_emb` addition.
+> - RoPE encodes *relative* position (how far apart two tokens are), not *absolute* position (which slot a token occupies). This generalises better to unseen sequence lengths.
+> - The rotation is applied to Q and K inside every attention layer, so positional information is refreshed at every block — unlike learned PE which is added once before Block 1.
+> - We will cover RoPE mechanics in detail in the attention phases.
+
 ---
 
 ### 2.5 — Combining token + position embeddings
@@ -169,6 +185,25 @@ x = self.transformer.drop(tok_emb + pos_emb)   # [PT]
 # Prevents over-reliance on specific embedding dimensions
 ```
 
+> **🔧 Actual nanochat** (`gpt.py:428-438`)
+>
+> nanochat has **no dropout anywhere** — not on embeddings, not in attention, not in the MLP. Instead, it applies RMSNorm after embedding and then a "smear gate" that mixes in the previous token's embedding:
+>
+> ```python
+> # Embedding forward — no wpe, no dropout
+> x = self.transformer.wte(idx)   # embed current token
+> x = x.to(COMPUTE_DTYPE)         # ensure compute dtype (bf16)
+> x = norm(x)                     # RMSNorm after embedding (not dropout!)
+>
+> # Smear gate — cheap bigram mixing (training only)
+> gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))
+> x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
+> ```
+>
+> - **No dropout** — nanochat relies on other regularisation (weight decay, small model size, short training) instead of randomly zeroing values.
+> - **RMSNorm instead of dropout** — the embedding is normalised by its root-mean-square immediately after lookup.
+> - **Smear gate** — a new feature not in GPT-2. For each position after the first, a small learned gate mixes in the previous token's embedding vector. This gives every token cheap access to its predecessor before attention even runs — like a lightweight bigram model baked into the embedding step.
+
 ---
 
 ### 2.8 — The complete Phase 2 forward pass
@@ -218,6 +253,60 @@ class GPT(nn.Module):                                          # [NC]
             )
         return logits, loss
 ```
+
+> **🔧 Actual nanochat** (`gpt.py:428-464`)
+>
+> The real nanochat forward pass differs substantially from the simplified version above. Here is what it actually does, with the key differences annotated:
+>
+> ```python
+> def forward(self, idx, targets=None):
+>     B, T = idx.shape
+>
+>     # ── Embedding: no wpe, no dropout ──────────────────────
+>     x = self.transformer.wte(idx)       # token embedding only
+>     x = x.to(COMPUTE_DTYPE)             # master weights fp32 → compute in bf16
+>     x = norm(x)                         # RMSNorm (not LayerNorm, not dropout)
+>
+>     # ── Smear gate: cheap bigram mixing ────────────────────
+>     gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))
+>     x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
+>
+>     x0 = x                              # save initial embedding for later blending
+>
+>     # ── Transformer blocks with per-layer scalars ──────────
+>     for i, block in enumerate(self.transformer.h):
+>         # Value embeddings (ResFormer) — alternating layers get a direct token→value lookup
+>         ve = self.value_embeds[str(i)](idx).to(x.dtype) if str(i) in self.value_embeds else None
+>         x = block(x, ve=ve, cos=self.cos, sin=self.sin)
+>         # Per-layer residual scaling + initial embedding blend-back
+>         x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
+>
+>     x = norm(x)                         # final RMSNorm (not LayerNorm)
+>
+>     # ── Backout: subtract mid-layer residual ───────────────
+>     if x_backout is not None:
+>         x = x - self.backout_lambda.to(x.dtype) * x_backout
+>
+>     logits = self.lm_head(x)            # project to vocab
+> ```
+>
+> Key differences from the simplified GPT-2 version:
+>
+> - **No `wpe`** — position is handled by RoPE inside attention (cos/sin buffers passed to each block).
+> - **No dropout** — anywhere in the entire model.
+> - **RMSNorm** replaces LayerNorm everywhere (including the final norm).
+> - **Smear gate** — mixes previous token's embedding into current position before the blocks run.
+> - **`x0` blend-back** — the initial embedding is saved and blended back into the residual stream at every layer via learned `x0_lambdas`. This prevents the original token identity from being washed out by deep residual accumulation.
+> - **Per-layer `resid_lambdas`** — each layer scales its residual contribution independently (learned scalars, not fixed 1.0).
+> - **Value embeddings** — alternating layers get a direct token-ID-to-value lookup (ResFormer), giving the model a shortcut from token identity into the value stream.
+> - **Backout** — subtracts a scaled mid-layer residual before the final projection, removing information the model has learned is unhelpful for prediction.
+> - **Custom `Linear`** (`gpt.py:45-50`) — master weights stay in fp32, but `forward()` casts to the activation dtype (bf16) for the matmul. No bias term.
+>
+> ```python
+> class Linear(nn.Linear):
+>     def forward(self, x):
+>         return F.linear(x, self.weight.to(dtype=x.dtype))
+> ```
 
 ---
 
@@ -289,6 +378,19 @@ self.ln_1 = nn.LayerNorm(config.n_embd)   # [PT]
 # Applied before FFN:       x = self.ln_2(x)
 # Applied after final block: x = self.transformer.ln_f(x)
 ```
+
+> **🔧 Actual nanochat** (`gpt.py:42-43`)
+>
+> nanochat uses **RMSNorm** (Root Mean Square Normalisation) instead of LayerNorm. It is simpler — it only scales by the RMS of the vector, without centering (subtracting the mean) and without learnable parameters:
+>
+> ```python
+> def norm(x):
+>     return F.rms_norm(x, (x.size(-1),))
+> ```
+>
+> - **No centering** — LayerNorm subtracts the mean then divides by std. RMSNorm skips the mean subtraction and divides by RMS = `√(mean(x²))`. Empirically works just as well for transformers, with less computation.
+> - **No learnable γ, β** — standard LayerNorm has a learned scale (`γ`) and shift (`β`) per dimension. nanochat's `norm()` has zero parameters — it is a pure function.
+> - **Used everywhere** — after embedding, before attention, before MLP, before final projection. Same `norm()` call throughout.
 
 #### val.bin checkpointing — why two datasets
 
@@ -472,6 +574,23 @@ for step in range(max_iters):                                 # [NC]
     #   weight -= lr × m / (√v + 1e-8)              (adaptive update)
     #   weight -= lr × 0.1 × weight                 (weight decay, decoupled)
 ```
+
+> **🔧 Actual nanochat** (`nanochat/optim.py`)
+>
+> nanochat does **not** use plain AdamW for all parameters. It uses a **Muon + AdamW hybrid** — two different optimizers for different parameter types:
+>
+> ```python
+> # Muon for 2D matrix parameters (attention projections, MLP weights)
+> #   - Uses momentum + "polar express" orthogonalisation + variance reduction
+> #   - More aggressive updates for the large weight matrices
+>
+> # AdamW for everything else (embeddings, scalars, lm_head, 1D params)
+> #   - Standard adaptive optimizer for parameters that need gentler handling
+> ```
+>
+> - **Why two optimizers?** Large 2D weight matrices (the bulk of the model's parameters) benefit from Muon's orthogonalisation step, which keeps weight matrices well-conditioned. Embeddings and scalar parameters are better served by AdamW's per-element adaptivity.
+> - **Muon** (Momentum + Unitarisation) applies Newton-Schulz iterations to orthogonalise the update direction — a more principled update for matrix-valued parameters than Adam's element-wise approach.
+> - The conceptual AdamW explanation above still applies to the AdamW half of nanochat's optimizer, and the momentum/variance concepts carry over to understanding Muon.
 
 ---
 

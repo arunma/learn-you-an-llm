@@ -41,6 +41,15 @@ att = att * (1.0 / math.sqrt(k.size(-1)))           # [NC] scale by 1/√64 = 0.
 # k.size(-1) = head_dim = 64
 ```
 
+> **🔧 Actual nanochat** (`gpt.py:106`) — Flash Attention handles scaling internally. There is no explicit `* (1.0 / math.sqrt(...))` call. Instead, nanochat applies QK-norm before attention:
+> ```python
+> q, k = norm(q), norm(k)   # RMSNorm on Q and K
+> q = q * 1.2               # learned-scale replacement
+> k = k * 1.2
+> ```
+> - QK-norm + fixed scalar replaces the classic `1/sqrt(d_h)` scaling
+> - Flash Attention's internal scaling is effectively a no-op when inputs are already normalised
+
 ---
 
 ### ② The causal mask — enforcing the past-only rule
@@ -75,6 +84,26 @@ att = att.masked_fill(                              # [PT]
     float('-inf')                   # [NC] replace those positions with -infinity
 )
 ```
+
+> **🔧 Actual nanochat** (`gpt.py:106-118`) — No explicit mask matrix. Flash Attention applies causal masking internally when `causal=True`:
+> ```python
+> # Training path:
+> y = flash_attn.flash_attn_func(q, k, v, causal=True, window_size=window_size)
+>
+> # Inference path (with KV cache):
+> k_cache, v_cache = kv_cache.get_layer_cache(self.layer_idx)
+> y = flash_attn.flash_attn_with_kvcache(
+>     q, k_cache, v_cache,
+>     k=k, v=v,
+>     cache_seqlens=kv_cache.cache_seqlens,
+>     causal=True,
+>     window_size=window_size,
+> )
+> ```
+> - No `register_buffer('bias', ...)` — no stored mask tensor at all
+> - `causal=True` tells Flash Attention to enforce the lower-triangular rule inside the fused kernel
+> - `window_size=(N, 0)` adds **sliding window attention**: each token only attends to the N nearest past tokens, not the entire history
+> - Memory-efficient: never materialises the full `(B, H, T, T)` attention matrix
 
 ---
 
@@ -186,3 +215,75 @@ def forward(self, x):                                            # [NC]
     y = self.resid_dropout(self.c_proj(y))                         # [PT]
     return y   # (B, T, 384) — same shape as input
 ```
+
+> **🔧 Actual nanochat** (`gpt.py:65-126`) — The entire manual attention computation is replaced by Flash Attention. Here is the real forward pass:
+> ```python
+> class CausalSelfAttention(nn.Module):
+>     def __init__(self, config, layer_idx):
+>         super().__init__()
+>         self.layer_idx = layer_idx
+>         self.n_head = config.n_head
+>         self.n_kv_head = config.n_kv_head
+>         self.n_embd = config.n_embd
+>         self.head_dim = self.n_embd // self.n_head
+>         self.c_q = Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
+>         self.c_k = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+>         self.c_v = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+>         self.c_proj = Linear(self.n_embd, self.n_embd, bias=False)
+>         self.ve_gate_channels = 12
+>         self.ve_gate = Linear(self.ve_gate_channels, self.n_kv_head, bias=False) \
+>             if has_ve(layer_idx, config.n_layer) else None
+>
+>     def forward(self, x, ve, cos_sin, window_size, kv_cache):
+>         B, T, C = x.size()
+>         q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+>         k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
+>         v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
+>         # Value embeddings — gated additive signal on v
+>         if ve is not None:
+>             ve = ve.view(B, T, self.n_kv_head, self.head_dim)
+>             gate = 3 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))
+>             v = v + gate.unsqueeze(-1) * ve
+>         # Rotary position embeddings (replace absolute position embeddings)
+>         cos, sin = cos_sin
+>         q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
+>         # QK-norm + fixed scalar (replaces 1/sqrt(d_h) scaling)
+>         q, k = norm(q), norm(k)
+>         q = q * 1.2
+>         k = k * 1.2
+>         # Flash Attention — scale, mask, softmax, att@v all fused in one kernel
+>         if kv_cache is None:
+>             y = flash_attn.flash_attn_func(q, k, v, causal=True, window_size=window_size)
+>         else:
+>             k_cache, v_cache = kv_cache.get_layer_cache(self.layer_idx)
+>             y = flash_attn.flash_attn_with_kvcache(q, k_cache, v_cache, k=k, v=v,
+>                 cache_seqlens=kv_cache.cache_seqlens, causal=True, window_size=window_size)
+>             if self.layer_idx == kv_cache.n_layers - 1:
+>                 kv_cache.advance(T)
+>         # Reassemble — no transpose needed (FA3 outputs B, T, H, D)
+>         y = y.contiguous().view(B, T, -1)
+>         y = self.c_proj(y)   # no dropout wrapper
+>         return y
+> ```
+> Key differences from the conceptual version above:
+> - **No `q @ k.transpose()`, no manual mask, no explicit softmax** — Flash Attention fuses all four steps (scale, mask, softmax, att@v) into a single GPU kernel
+> - **Separate Q/K/V projections** (`c_q`, `c_k`, `c_v`) instead of fused `c_attn` — enables grouped-query attention (`n_kv_head < n_head`)
+> - **Rotary position embeddings** (`apply_rotary_emb`) instead of learned absolute position embeddings
+> - **QK-norm** (`norm(q)`, `norm(k)`) + fixed scalar 1.2 replaces classical `1/sqrt(d_h)` scaling
+> - **Value embeddings** (`ve`) — a gated additive signal on v, active on selected layers
+> - **Sliding window attention** — `window_size=(N, 0)` limits each token's attention span per layer
+> - **KV cache** for efficient autoregressive inference
+> - **No dropout** anywhere — no `attn_dropout`, no `resid_dropout`
+> - **No `.transpose(1,2)`** on reassembly — Flash Attention outputs `(B, T, H, D)` directly
+>
+> Sliding window sizes are computed per-layer (`gpt.py:285-312`):
+> ```python
+> def _compute_window_sizes(self, config):
+>     pattern = config.window_pattern.upper()  # e.g. "SSSL"
+>     long_window = config.sequence_len         # 2048
+>     short_window = -(-long_window // 4 // 128) * 128  # ceil to FA3 tile (768)
+>     # Tile pattern across layers, final layer always gets full context
+> ```
+> - Pattern like `"SSSL"` repeats across layers: 3 short-window layers, then 1 full-context layer
+> - Short window = `ceil(seq_len / 4 / 128) * 128` — aligned to Flash Attention tile size
+> - Final layer always sees full sequence regardless of pattern

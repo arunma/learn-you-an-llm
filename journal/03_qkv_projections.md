@@ -58,6 +58,18 @@ self.c_attn = nn.Linear(384, 3 * 384, bias=False)   # [PT]
 
 One GPU operation instead of three. Faster in practice — GPUs prefer large parallel operations over many small ones. Conceptually identical.
 
+> **🔧 Actual nanochat** (`gpt.py:75-77`)
+>
+> nanochat does NOT use a fused `c_attn`. It uses three separate `Linear` layers:
+> ```python
+> self.c_q = Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
+> self.c_k = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+> self.c_v = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+> ```
+> - **No fused projection.** Three separate matrices, not one big one split afterward.
+> - **GQA support:** K and V project to `n_kv_head * head_dim`, not `n_head * head_dim`. When `n_kv_head < n_head`, K/V have fewer heads than Q — this is Grouped Query Attention (GQA). Multiple query heads share the same K/V head, reducing memory with minimal quality loss.
+> - **Config values:** `n_head = 6`, `n_kv_head = 6`, `head_dim = n_embd // n_head = 768 // 6 = 128`. Note `head_dim` is 128, not 64 — nanochat uses a larger embedding (768) than the simplified example (384).
+
 ---
 
 #### .view() and .transpose() — the head split explained
@@ -114,6 +126,18 @@ Head 4: q[b, 4, :, :]  →  (T, 64)  dims 256–319
 Head 5: q[b, 5, :, :]  →  (T, 64)  dims 320–383
 ```
 
+> **🔧 Actual nanochat** (`gpt.py:87-89`)
+>
+> nanochat skips the `.transpose()` entirely. Flash Attention 3 expects `(B, T, H, D)`, so the `.view()` output is the final layout:
+> ```python
+> q = self.c_q(x).view(B, T, self.n_head, self.head_dim)      # (B, T, 6, 128)
+> k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)   # (B, T, 6, 128)
+> v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)   # (B, T, 6, 128)
+> ```
+> - **No `.transpose(1, 2)`** — Flash Attention's native layout is `(B, T, H, D)`, not `(B, H, T, D)`. One fewer operation.
+> - **No `.split()`** — since there is no fused projection, each linear produces its own output directly.
+> - **K and V may have fewer heads than Q** when `n_kv_head < n_head` (GQA). Flash Attention handles the head broadcasting internally.
+
 ---
 
 #### `q @ k.transpose(-2, -1)` — computing attention scores
@@ -155,6 +179,44 @@ att = att * (1.0 / (head_dim ** 0.5))   # [NC]
 ```
 
 > **Why negative indices?** `-1` = last dim, `-2` = second-to-last. Negative indexing makes this line work regardless of how many batch dimensions sit in front — shape-agnostic.
+
+> **🔧 Actual nanochat** (`gpt.py:57-63, 98-102`)
+>
+> nanochat does not use the `1/√d_h` scaling on the score matrix. Instead, it applies **RoPE** (Rotary Position Embeddings) and **QK Norm** directly to the Q and K vectors before attention:
+>
+> **RoPE** — encodes position by rotating Q and K vectors (`gpt.py:98-99`):
+> ```python
+> cos, sin = cos_sin
+> q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
+> ```
+> Where `apply_rotary_emb` (`gpt.py:57-63`):
+> ```python
+> def apply_rotary_emb(x, cos, sin):
+>     d = x.shape[3] // 2
+>     x1, x2 = x[..., :d], x[..., d:]
+>     y1 = x1 * cos + x2 * sin
+>     y2 = x1 * (-sin) + x2 * cos
+>     return torch.cat([y1, y2], 3)
+> ```
+> RoPE splits each head's dimensions in half, then rotates the two halves using precomputed cos/sin values that depend on sequence position. The dot product between two rotated vectors naturally encodes their *relative* distance — closer tokens produce higher scores. This replaces learned positional embeddings (`wpe`) entirely.
+>
+> **QK Norm** — applied after RoPE (`gpt.py:100-102`):
+> ```python
+> q, k = norm(q), norm(k)   # RMSNorm on Q and K
+> q = q * 1.2               # sharper attention scaling
+> k = k * 1.2
+> ```
+> - Instead of scaling scores by `1/√d_h` after the matmul, nanochat normalizes Q and K with RMSNorm *before* the matmul, then applies a fixed factor of 1.2.
+> - This stabilizes training — raw dot products can explode or vanish, and normalizing the inputs prevents both.
+>
+> **Value Embedding (ResFormer)** — mixed into V before attention (`gpt.py:92-95`):
+> ```python
+> if ve is not None:
+>     ve = ve.view(B, T, self.n_kv_head, self.head_dim)
+>     gate = 3 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))
+>     v = v + gate.unsqueeze(-1) * ve
+> ```
+> A gated residual added to V from a separate "value embedding" — not present in standard transformers. The gate is learned per-layer and controls how much extra information flows through V.
 
 ---
 
@@ -229,6 +291,35 @@ class CausalSelfAttention(nn.Module):           # [NC] custom class
         # 1s below diagonal = allowed to attend
         # 0s above diagonal = will be masked to -inf before softmax
 ```
+
+> **🔧 Actual nanochat** (`gpt.py:65-81`)
+>
+> The real `__init__` differs substantially:
+> ```python
+> class CausalSelfAttention(nn.Module):
+>     def __init__(self, config, layer_idx):
+>         super().__init__()
+>         self.layer_idx = layer_idx
+>         self.n_head = config.n_head
+>         self.n_kv_head = config.n_kv_head
+>         self.n_embd = config.n_embd
+>         self.head_dim = self.n_embd // self.n_head
+>         assert self.n_embd % self.n_head == 0
+>         assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
+>         self.c_q = Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
+>         self.c_k = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+>         self.c_v = Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+>         self.c_proj = Linear(self.n_embd, self.n_embd, bias=False)
+>         self.ve_gate_channels = 12
+>         self.ve_gate = Linear(self.ve_gate_channels, self.n_kv_head, bias=False) if has_ve(layer_idx, config.n_layer) else None
+> ```
+> Key differences from the simplified version:
+> - **No `c_attn`** — three separate projections (`c_q`, `c_k`, `c_v`) instead of one fused layer.
+> - **No causal mask buffer** — Flash Attention handles causal masking internally, so no `register_buffer('bias', ...)`.
+> - **No dropout layers** — no `attn_dropout` or `resid_dropout`. Modern architectures often drop dropout entirely.
+> - **`layer_idx` parameter** — each attention layer knows its position in the stack, used to decide whether to apply value embedding (`has_ve`).
+> - **`n_kv_head` tracked separately** — enables GQA where K/V have fewer heads than Q.
+> - **`ve_gate`** — a small linear layer (12 input channels) that gates the value embedding, present only on certain layers.
 
 ---
 

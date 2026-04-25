@@ -177,6 +177,45 @@ out = generate(model, context,                            # [NC]
 print(enc.decode(out[0].tolist()))                        # [NC] back to text
 ```
 
+> **🔧 Actual nanochat** (`gpt.py:483–513` — `GPT.generate()`)
+>
+> ```python
+> @torch.inference_mode()
+> def generate(self, tokens, max_tokens, temperature=1.0, top_k=None, seed=42):
+>     assert isinstance(tokens, list)
+>     device = self.get_device()
+>     rng = None
+>     if temperature > 0:
+>         rng = torch.Generator(device=device)
+>         rng.manual_seed(seed)
+>     ids = torch.tensor([tokens], dtype=torch.long, device=device)
+>     for _ in range(max_tokens):
+>         logits = self.forward(ids)
+>         logits = logits[:, -1, :]
+>         if top_k is not None and top_k > 0:
+>             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+>             logits[logits < v[:, [-1]]] = -float('Inf')
+>         if temperature > 0:
+>             logits = logits / temperature
+>             probs = F.softmax(logits, dim=-1)
+>             next_ids = torch.multinomial(probs, num_samples=1, generator=rng)
+>         else:
+>             next_ids = torch.argmax(logits, dim=-1, keepdim=True)
+>         ids = torch.cat((ids, next_ids), dim=1)
+>         token = next_ids.item()
+>         yield token   # <-- generator, yields one token at a time!
+> ```
+>
+> Differences from the simplified version above:
+> - **Python generator** (`yield`). Yields one token at a time instead of accumulating and returning the full sequence. The caller can print tokens as they arrive — streaming output.
+> - **`@torch.inference_mode()`** instead of `@torch.no_grad()`. A stricter, faster variant that also disables autograd view-tracking. Preferred for inference in modern PyTorch.
+> - **Accepts a plain Python list** of token IDs, not a pre-built tensor. Builds the tensor internally.
+> - **Explicit RNG with seed.** `torch.Generator` seeded with `seed=42` makes generation reproducible even across runs. The simplified version has no reproducibility guarantee.
+> - **Temperature=0 uses `argmax`** (greedy decoding). The simplified version has no greedy path — it always samples.
+> - **`forward()` returns only logits** during inference (not a `(logits, loss)` tuple), so no `_` unpacking needed.
+> - **Logits already have softcap applied** inside `forward()`. No extra clamping needed here.
+> - **No context cropping.** The simplified version crops to `block_size` for models with learned position embeddings. Nanochat uses rotary embeddings, so context length is handled differently.
+
 > **`@torch.no_grad()`** `[PT]` — disables gradient tracking for the entire function. During generation there is no loss, no backward pass, no weight update. Disabling gradients saves memory (no computation graph built) and speeds up inference. Always use this when generating — forgetting it wastes GPU memory silently.
 
 > **`model.eval()`** `[PT]` — switches dropout off. During training dropout randomly zeros values to prevent over-reliance. During inference you want the full, deterministic signal from every neuron. Call `model.eval()` before generating, `model.train()` before resuming training.
@@ -438,6 +477,25 @@ print(enc.decode(out[0].tolist()))                             # [NC]
 
 > **`torch.zeros((1,1))`** as starting context — token ID 0 fed in as a blank prompt. The model generates from nothing, producing whatever patterns it learned from the training data. This is the "hello world" moment for nanochat — the first time it speaks.
 
+> **🔧 Actual nanochat** (`gpt.py:374–414` — optimizer setup; training infrastructure)
+>
+> ```python
+> def setup_optimizer(self, unembedding_lr=0.004, embedding_lr=0.2,
+>                     matrix_lr=0.02, ...):
+>     # Separate params into: matrix_params, embedding_params, lm_head_params,
+>     # value_embeds_params, resid_params, x0_params, smear_params
+>     # Matrix params → Muon optimizer
+>     # Everything else → AdamW with per-group learning rates
+>     # Scale LR ∝ 1/√(d_model/768)
+> ```
+>
+> Differences from the simplified version above:
+> - **Not plain `torch.optim.AdamW`.** Uses a custom `MuonAdamW` (or `DistMuonAdamW` for distributed) that combines the Muon optimizer for matrix-shaped parameters with AdamW for everything else.
+> - **7+ parameter groups** with distinct learning rates: embeddings (0.2), unembedding/lm_head (0.004), matrix weights (0.02), residual lambdas, x0 lambdas, smear parameters, and value embeddings — each tuned separately.
+> - **Learning rate scales with model width:** `lr ∝ 1/√(d_model/768)`. Wider models automatically get smaller learning rates.
+> - **`torchrun` for distributed training.** The loop uses DDP (DistributedDataParallel), not a single-GPU loop.
+> - **No `torch.amp` / mixed precision.** Instead of `torch.cuda.amp.autocast`, nanochat manages dtypes explicitly via a custom `Linear` class and a global `COMPUTE_DTYPE` — all casts are manual and visible.
+
 ---
 
 ### 5.2 — Key takeaways
@@ -467,6 +525,20 @@ print(enc.decode(out[0].tolist()))                             # [NC]
 | `model.state_dict()` | All model parameters as an ordered dict |
 | `optimizer.state_dict()` | AdamW m/v buffers and settings as a dict |
 | `model.load_state_dict(sd)` | Restore model parameters from a saved dict |
+
+---
+
+> **🔧 Actual nanochat** — how Phase 5 differs end-to-end
+>
+> The simplified training loop and generate function above capture the core algorithm. The actual nanochat codebase layers on several production-grade techniques:
+>
+> - **Optimizer:** Muon for matrix weights + AdamW for scalars/embeddings, with 7+ param groups at different learning rates. Not a single `AdamW(model.parameters(), lr=3e-4)`.
+> - **Generation:** A Python generator that `yield`s tokens for streaming, with `@torch.inference_mode()`, explicit RNG seeding, and greedy/sampling toggle via `temperature=0`.
+> - **Forward pass:** Returns loss only (not a tuple) during training. Returns logits only during inference. Softcap bounds logits to ±15. Per-layer residual scaling, smear gate, and backout are all in the forward path.
+> - **Distributed:** `torchrun` + DDP, not single-GPU. Dtype management is explicit (`COMPUTE_DTYPE`), not via `torch.amp`.
+> - **Initialization:** Zero-init output projections, non-uniform per-layer lambdas, scaled embedding init.
+>
+> The five-step ritual (zero_grad → forward → backward → clip → step) is the same. The LR schedule shape (warmup + cosine decay) is the same. The validation/checkpointing logic is the same. The differences are in the details of *what* gets optimized and *how*.
 
 ---
 

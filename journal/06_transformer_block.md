@@ -264,6 +264,47 @@ ln_f + lm_head (weight tied to wte):  = 0.0M extra
 Total:                    ≈ 29.9M parameters
 ```
 
+> **🔧 Actual nanochat** (`gpt.py:154–199` — `GPT.__init__`)
+>
+> ```python
+> class GPT(nn.Module):
+>     def __init__(self, config, pad_vocab_size_to=64):
+>         super().__init__()
+>         self.config = config
+>         self.window_sizes = self._compute_window_sizes(config)
+>         padded_vocab_size = ((config.vocab_size + pad_vocab_size_to - 1)
+>                              // pad_vocab_size_to) * pad_vocab_size_to
+>         self.transformer = nn.ModuleDict({
+>             "wte": nn.Embedding(padded_vocab_size, config.n_embd),
+>             "h": nn.ModuleList([Block(config, layer_idx)
+>                                 for layer_idx in range(config.n_layer)]),
+>         })
+>         self.lm_head = Linear(config.n_embd, padded_vocab_size, bias=False)
+>         # Per-layer scalars
+>         self.resid_lambdas = nn.Parameter(torch.ones(config.n_layer))
+>         self.x0_lambdas = nn.Parameter(torch.zeros(config.n_layer))
+>         # Smear gate (bigram mixing)
+>         self.smear_gate = Linear(24, 1, bias=False)
+>         self.smear_lambda = nn.Parameter(torch.zeros(1))
+>         # Backout (subtract mid-layer residual)
+>         self.backout_lambda = nn.Parameter(0.2 * torch.ones(1))
+>         # Value embeddings (ResFormer)
+>         self.value_embeds = nn.ModuleDict({...})
+>         # Rotary embeddings
+>         cos, sin = self._precompute_rotary_embeddings(...)
+>         self.register_buffer("cos", cos, persistent=False)
+>         self.register_buffer("sin", sin, persistent=False)
+> ```
+>
+> Differences from the simplified version above:
+> - **No `wpe`, no `drop`, no `ln_f`.** Positional information comes from rotary embeddings (precomputed `cos`/`sin` buffers), not a learned position-embedding table. There is no dropout layer. There is no final LayerNorm — `norm(x)` is called inline in `forward()` instead.
+> - **Vocab is padded** to a multiple of 64 for GPU efficiency. Logits are later sliced back to the real vocab size.
+> - **Weights are NOT tied.** `lm_head` and `wte` are independent matrices (no `self.lm_head.weight = self.transformer.wte.weight`).
+> - **Per-layer learnable scalars:** `resid_lambdas` and `x0_lambdas` scale the residual stream and the original embedding at each layer (see `forward()` below).
+> - **Smear gate** mixes in the previous token's embedding — a cheap bigram prior.
+> - **Backout** subtracts a fraction of the mid-layer residual from the final output.
+> - **Value embeddings** (ResFormer-style) provide per-layer token-identity signals to the attention value path.
+
 ---
 
 ### 4.6 — The complete GPT.forward()
@@ -301,6 +342,61 @@ def forward(self, idx, targets=None):              # [NC]
 - **Inference:** pass `idx` only, `targets=None` → get `logits` only → softmax → sample next token
 
 The loss branch simply doesn't execute during generation.
+
+> **🔧 Actual nanochat** (`gpt.py:416–481` — `GPT.forward()`)
+>
+> ```python
+> def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
+>     B, T = idx.size()
+>     # Rotary embeddings (with KV cache offset support)
+>     T0 = 0 if kv_cache is None else kv_cache.get_pos()
+>     cos_sin = self.cos[:, T0:T0+T], self.sin[:, T0:T0+T]
+>     # Embed + norm (no positional embedding, no dropout)
+>     x = self.transformer.wte(idx)
+>     x = x.to(COMPUTE_DTYPE)
+>     x = norm(x)
+>     # Smear: mix previous token's embedding
+>     if kv_cache is None:
+>         gate = (self.smear_lambda.to(x.dtype)
+>                 * torch.sigmoid(self.smear_gate(x[:, 1:, :24])))
+>         x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
+>     # Forward through blocks with per-layer scaling
+>     x0 = x
+>     backout_layer = config.n_layer // 2
+>     for i, block in enumerate(self.transformer.h):
+>         x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
+>         ve = (self.value_embeds[str(i)](idx).to(x.dtype)
+>               if str(i) in self.value_embeds else None)
+>         x = block(x, ve, cos_sin, self.window_sizes[i], kv_cache)
+>         if i == backout_layer:
+>             x_backout = x
+>     # Backout mid-layer residual
+>     x = x - self.backout_lambda.to(x.dtype) * x_backout
+>     x = norm(x)
+>     # Logits with softcap
+>     softcap = 15
+>     logits = self.lm_head(x)
+>     logits = logits[..., :self.config.vocab_size]
+>     logits = logits.float()
+>     logits = softcap * torch.tanh(logits / softcap)
+>     # Loss or inference
+>     if targets is not None:
+>         loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
+>                                targets.view(-1), ignore_index=-1,
+>                                reduction=loss_reduction)
+>         return loss
+>     else:
+>         return logits
+> ```
+>
+> Differences from the simplified version above:
+> - **Returns only loss during training** (not a `(logits, loss)` tuple). During inference returns only logits.
+> - **No `wpe`, no `drop`, no `ln_f`.** Positional encoding is handled by rotary embeddings (`cos_sin`) passed into each block. `norm(x)` is called inline instead of a stored `ln_f` module.
+> - **Per-layer scaling.** Before each block: `x = resid_lambdas[i] * x + x0_lambdas[i] * x0`. The original embedding `x0` is mixed back in with a learned weight at every layer — the model can "re-read" the raw token signal.
+> - **Smear gate.** Before the block loop, the previous token's embedding is mixed into each position via a learned gate. A cheap bigram prior that helps early training.
+> - **Backout.** After all blocks, a fraction of the mid-layer residual is subtracted: `x = x - backout_lambda * x_backout`. This discourages the model from storing temporary computation in the residual stream.
+> - **Logit softcapping.** `softcap * tanh(logits / softcap)` bounds logits to ±15, preventing overconfident predictions and stabilising training.
+> - **KV cache support.** The `kv_cache` argument and `T0` offset enable efficient autoregressive generation (process only the new token, reuse cached keys/values from prior steps).
 
 ---
 
@@ -387,6 +483,21 @@ Yes — multiple unrelated sentences run simultaneously. B=12 sentences, each T=
 2. `lm_head`: `(B, T, 384)` → `(B, T, 50257)` — V appears
 
 Everything between these two points operates at exactly `(B, T, 384)`. All 6 blocks, all 36 attention heads, all MLP layers — same shape throughout.
+
+> **🔧 Actual nanochat** (`gpt.py:201–258` — weight initialization)
+>
+> The simplified version above relies on PyTorch defaults. Actual nanochat has a dedicated `init_weights()` method with custom per-layer initialization:
+>
+> ```python
+> # Conceptual summary of init_weights():
+> # - resid_lambdas: non-uniform across layers (not all 1.0)
+> # - x0_lambdas: decay across layers (early layers get more x0 signal)
+> # - Attention Q/K/V weights: uniform init
+> # - Output projections (c_proj, mlp_proj): zero init
+> # - Embeddings: normal init scaled by 1/√d_model
+> ```
+>
+> Key difference: **zero-init for output projections** means each block starts as an identity function (its residual contribution is zero). The model begins by passing the embedding straight through, then gradually learns what each block should add. This stabilises early training — random large residuals from 6+ blocks would otherwise make the initial loss chaotic.
 
 ---
 

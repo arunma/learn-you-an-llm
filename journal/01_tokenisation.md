@@ -157,6 +157,31 @@ tokenise("low lower", merge_rules)
 
 **Key insight:** `merge_rules` is a plain Python list. Serialise it to disk and you have a complete, reloadable tokeniser — no PyTorch needed.
 
+> **🔧 Actual nanochat** (`nanochat/tokenizer.py`)
+>
+> nanochat trains its own BPE vocabulary from scratch rather than reusing GPT-2's:
+>
+> ```python
+> # nanochat/tokenizer.py — RustBPETokenizer
+> class RustBPETokenizer:
+>     """Train with rustbpe (Rust CLI), infer with tiktoken (fast C/Rust)."""
+>
+>     def encode(self, text, prepend=None, append=None, num_threads=8):
+>         # text can be str or list[str]; batch encoding parallelised
+>         ...
+>
+>     def decode(self, ids):
+>         return self.enc.decode(ids)
+> ```
+>
+> - **Vocab size: 32,768** (not 50,257). Smaller vocab = smaller embedding table, tuned to nanochat's training data.
+> - **Split pattern** — GPT-4 style regex, not GPT-2's:
+>   ```python
+>   SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,2}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
+>   ```
+>   This controls how raw text is pre-split before BPE merges run. The GPT-4 pattern handles numbers and whitespace differently than GPT-2's.
+> - **Two-tool pipeline:** `rustbpe` (Rust CLI) trains the merge rules; `tiktoken` loads them at runtime for fast inference. Best of both worlds.
+
 ---
 
 ### 1.2 — Character-level tokeniser (nanogpt Shakespeare demo)
@@ -317,6 +342,24 @@ doc2   = enc.encode_ordinary("Second document...")
 tokens = doc1 + [eot] + doc2                      # [NC]
 ```
 
+> **🔧 Actual nanochat** (`nanochat/tokenizer.py:13-25`)
+>
+> nanochat does not use GPT-2's `<|endoftext|>`. It defines its own special tokens for chat structure:
+>
+> ```python
+> SPECIAL_TOKENS = [
+>     "<|bos|>",              # beginning of sequence (replaces EOT as document separator)
+>     "<|user_start|>", "<|user_end|>",
+>     "<|assistant_start|>", "<|assistant_end|>",
+>     "<|python_start|>", "<|python_end|>",
+>     "<|output_start|>", "<|output_end|>",
+> ]
+> ```
+>
+> - These get appended after the 32,768 BPE tokens, so vocab_size = 32,768 + 9 = 32,777.
+> - Every document begins with `<|bos|>` instead of being separated by EOT.
+> - The chat role tokens (`user_start`, `assistant_start`, etc.) let the model learn conversational turn structure during pre-training.
+
 #### Data preparation — prepare.py (run once before training)
 
 ```python
@@ -374,6 +417,25 @@ xb, yb = get_batch('train')
 ```
 
 > **Why `.astype(np.int64)` in get_batch?** Files are stored as uint16 (compact). `nn.Embedding` requires int64. The conversion happens here — compact on disk, correct dtype in the model.
+
+> **🔧 Actual nanochat** (`nanochat/dataloader.py`)
+>
+> nanochat replaces `.bin` files and `np.memmap` with a streaming parquet-based dataloader:
+>
+> ```python
+> # nanochat/dataloader.py — BOS-aligned bestfit dataloader
+> def tokenizing_distributed_data_loader_with_state_bos_bestfit(
+>     tokenizer, B, T, split, ...):
+>     # Reads from parquet files, tokenizes on-the-fly
+>     # Handles DDP sharding and resume from checkpoint
+>     # Pre-allocates pinned CPU + GPU buffers for efficient transfer
+>     ...
+> ```
+>
+> - **Parquet, not `.bin`:** data stays in parquet format; tokenisation happens on-the-fly in the dataloader.
+> - **Best-fit document packing:** documents are packed into fixed-length rows using a best-fit algorithm. Every row starts with `<|bos|>`. This gives 100% utilisation (no padding tokens), at the cost of ~35% of tokens being cropped at `T=2048`.
+> - **No `np.memmap`:** instead, pinned CPU buffers are pre-allocated and data is streamed directly to GPU. This avoids the random-access page-fault pattern of memmap on large datasets.
+> - **DDP-aware:** the dataloader handles multi-GPU sharding natively, so each process sees a disjoint slice of the data.
 
 #### Spaces are part of tokens — an important detail
 
@@ -458,5 +520,18 @@ class GPT(nn.Module):                             # [NC] class
 
 6. **PyTorch built-ins in Phase 1** — only in `get_batch()`:
    `torch.randint`, `torch.stack`, `torch.from_numpy`, `.to(device)`, `torch.tensor`
+
+> **🔧 Actual nanochat — how it diverges from the simplified code above**
+>
+> | Aspect | Simplified (this journal) | Actual nanochat |
+> |--------|--------------------------|-----------------|
+> | Tokenizer | `tiktoken.get_encoding("gpt2")` | `RustBPETokenizer` — custom BPE trained with `rustbpe`, inference via `tiktoken` |
+> | Vocab size | 50,257 (GPT-2) | 32,768 + 9 special tokens = 32,777 |
+> | Special tokens | `<\|endoftext\|>` (EOT) | `<\|bos\|>`, `<\|user_start\|>`, `<\|assistant_end\|>`, etc. |
+> | Data format | `.bin` files via `np.memmap` | Parquet files, tokenised on-the-fly in the dataloader |
+> | Batching | Random offset into flat array | Best-fit document packing, BOS-aligned rows, zero padding |
+> | Split pattern | GPT-2 regex | GPT-4 style regex (better number/whitespace handling) |
+>
+> The conceptual flow is identical — text → BPE merge rules → integer IDs → batched tensors → `nn.Embedding`. The differences are all engineering choices for training a chat model at scale vs. a single-file demo.
 
 ---
