@@ -3173,9 +3173,98 @@ Transformer blocks (Phases 3 + 4)
 
 `lm_head` is the exit door. The attention heads are the thinking that happened inside the blocks. They are unrelated beyond sharing the word "head."
 
+#### lm_head — the full pipeline (training vs inference)
+
+`lm_head` produces raw logits only. What happens after it diverges depending on whether you are training or generating:
+
+```
+Hidden states from final block:   (B, T, 768)
+              ↓
+    lm_head: Linear(768, 32768)
+              ↓
+Raw logits:                        (B, T, 32768)
+              ↓
+    softcap: 15 × tanh(logits / 15)    ← smoothly caps to ±15 (nanochat modern addition)
+              ↓
+Capped logits:                     (B, T, 32768)
+              │
+              ├──► [Training]
+              │      F.cross_entropy(logits, targets)
+              │      → applies log-softmax internally
+              │      → compares against target token
+              │      → loss scalar
+              │
+              └──► [Inference]
+                     logits / temperature
+                     → F.softmax(logits, dim=-1)     ← softmax here, not inside lm_head
+                     → torch.multinomial(probs, 1)   ← sample one token
+                     → next token ID
+```
+
+**Why softmax, not sigmoid?**
+
+Sigmoid maps each logit independently to (0, 1) — used for binary or multi-label problems where multiple options can be true simultaneously. Softmax normalises all logits together so they sum to 1 — used for multi-class problems where exactly one option is chosen.
+
+Next-token prediction is multi-class: pick exactly one token from 32,768 possibilities. Softmax is the correct tool. The 32,768 scores must compete against each other and redistribute probability mass — sigmoid cannot do this.
+
+**The softcap (`15 × tanh(logits / 15)`):**
+
+A modern addition not in the original GPT-2. After lm_head, extreme logit values (say +847 or -312) cause numerical instability in softmax. The tanh smoothly clamps any value into the range (−15, +15) without hard-clipping — gradients still flow cleanly through tanh at these boundaries. This is another technique from the modded-nanoGPT speedrun community.
+
 ---
 
-### 4.4 — Each token position is a complete training example
+### Value embeddings — why vocab × n_embd, not n_embd × n_embd
+
+A natural question after seeing value embeddings: why does each layer's value embedding table have shape `(vocab_size, n_embd)` = `(32768, 768)` rather than the smaller `(768, 768)` that attention weight matrices use?
+
+**The answer is the difference between a lookup table and a transformation:**
+
+```python
+# c_v — a transformation (768 × 768):
+v_dynamic = c_v(x)           # takes a 768-dim hidden state → produces 768-dim V vector
+                               # works on whatever vector flows through
+                               # does NOT know which specific token this is
+
+# value_embed — a lookup table (32768 × 768):
+v_static = value_embed[token_ids]   # takes a token ID integer → looks up its row
+                                     # produces a vector specific to THIS token type
+                                     # DOES know which specific token this is
+```
+
+A `(768, 768)` matrix is applied to the hidden state — it transforms whatever 768-dim vector arrives. It cannot say "token ID 8417 specifically gets this vector" because it never sees the token ID. It only sees the already-embedded 768-dim representation.
+
+A `(32768, 768)` table has one dedicated row per token type. Token ID 8417 always gets row 8417, regardless of context. This is fundamentally different: it is **identity-based** retrieval, not context-based transformation.
+
+**The two V paths serve completely different purposes:**
+
+```
+Standard V path (c_v, every layer):
+  "What value does this contextualised representation contribute?"
+  Input: 768-dim hidden state (context-dependent)
+  Shape: (768, 768) — a transformation rule
+
+Value embedding path (selected layers):
+  "What value does THIS SPECIFIC TOKEN TYPE contribute?"
+  Input: integer token ID
+  Shape: (32768, 768) — a lookup table with one row per token type
+
+Combined: v = v_dynamic + gate × v_static
+```
+
+If value embeddings used a `(768, 768)` matrix, they would just be another transformation of the hidden state — functionally redundant with `c_v`. The entire point is to provide a signal that is **not** derived from the contextualised hidden state.
+
+**Could the tables be shared across layers?**
+
+Yes — one shared `(32768, 768)` table used by all VE layers would cost less. But per-layer tables are more expressive: "cat" can contribute a different static signal at layer 1 (where syntactic features dominate) vs layer 11 (where semantic features dominate). The model learns what raw token identity means at each depth. nanochat uses per-layer tables, kept to 6 layers (alternating) to cap the cost.
+
+**Parameter cost comparison:**
+
+| Shape | Type | Per-layer cost | What it represents |
+|-------|------|---------------|-------------------|
+| `(768, 768)` | Linear | ~590K params | Transformation of hidden state — redundant with c_v |
+| `(32768, 768)` | Embedding | ~25M params | One static V vector per token type — what VE actually is |
+
+The 42× cost difference is the price of true token-identity lookup over hidden-state transformation. nanochat judges this worth paying because: (1) lookup is cheap at inference (no matmul), (2) the signal is qualitatively different from anything c_v can produce, (3) it empirically speeds up training convergence.
 
 This is the key insight that ties everything together.
 

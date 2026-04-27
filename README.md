@@ -21,7 +21,7 @@ The `journal/` directory breaks down the full nanochat build into 8 sections, fr
 | 3 | [Q/K/V Projections](journal/03_qkv_projections.md) | Why three projections, fused `c_attn`, `.view()`/`.transpose()`, attention score computation, dimension trace |
 | 4 | [Scaled Attention](journal/04_scaled_attention.md) | Scale by 1/sqrt(d_h), causal mask, softmax, weighted sum of V, head reassembly |
 | 5 | [Residuals, Multi-Head & MLP](journal/05_residuals_multihead_mlp.md) | Vanishing gradients, residual connections, MLP/FFN, `c_proj` synthesis, complete `CausalSelfAttention` |
-| 6 | [Transformer Block](journal/06_transformer_block.md) | Residual stream, `Block` class, `GPT` model, `forward()`, `lm_head`, end-to-end shape trace |
+| 6 | [Transformer Block](journal/06_transformer_block.md) | Residual stream, `Block` class, `GPT` model, `forward()`, `lm_head` pipeline (training vs inference), softcap, value embeddings (lookup vs transformation), end-to-end shape trace |
 | 7 | [Training & Generation](journal/07_training_and_generation.md) | Autoregressive generation, temperature, top-k, training loop, LR scheduling, checkpointing |
 
 The original monolithic journal is in `nanochat_learning_journal.md`.
