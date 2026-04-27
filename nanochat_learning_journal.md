@@ -65,6 +65,45 @@ These are the only two places `vocab_size` touches the model. Everything in betw
 
 ---
 
+### ★ The Complete Dimension Trace — get_batch() to attention scores
+
+*This is the single most important reference table in this journal. It traces every shape change from raw token IDs all the way to the `(B, 6, T, T)` attention score matrix inside CausalSelfAttention. Memorise this and the entire model becomes readable.*
+
+| Step | Operation | Shape | Notes |
+|------|-----------|-------|-------|
+| 0 | `get_batch()` `[NC]` | `(B, T)` | `(12, 1024)` int64 — raw token IDs |
+| 1 | `wte(idx)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — **C=384 appears. 2D→3D** |
+| 2 | `+ wpe(pos)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — shape unchanged |
+| 3 | `c_attn(x)` `[PT]` | `(B, T, 3C)` | `(12, 1024, 1152)` — Q+K+V fused. C triples |
+| 4 | `.split(384, dim=2)` `[PT]` | `q,k,v: (B, T, C)` | `(12, 1024, 384)` × 3 tensors |
+| 5 | `.view(B, T, 6, 64)` `[PT]` | `(B, T, n_h, d_h)` | `(12, 1024, 6, 64)` — **4D! heads labelled** |
+| 6 | `.transpose(1, 2)` `[PT]` | `(B, n_h, T, d_h)` | `(12, 6, 1024, 64)` — heads → dim 1 |
+| 7★ | `q @ k.T(-2,-1)` `[PT]` | `(B, n_h, T, T)` | `(12, 6, 1024, 1024)` — **75M scores!** |
+| 8 | `× 1/√64` `[NC]` | `(B, n_h, T, T)` | scaled — prevents softmax collapse |
+| 9 | `masked_fill(-∞)` `[PT]` | `(B, n_h, T, T)` | future positions zeroed |
+| 10 | `softmax(dim=-1)` `[PT]` | `(B, n_h, T, T)` | weights sum to 1.0 per row |
+| 11 | `att @ v` `[PT]` | `(B, n_h, T, d_h)` | `(12, 6, 1024, 64)` — weighted value sum |
+| 12 | `.transpose(1,2)` `[PT]` | `(B, T, n_h, d_h)` | `(12, 1024, 6, 64)` — heads back to dim 2 |
+| 13 | `.view(B, T, 384)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — 6×64 concatenated |
+| 14 | `c_proj` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — **heads mixed. synthesis complete ✓** |
+
+`B=12  ·  T=1024  ·  C=n_embd=384  ·  n_h=n_head=6  ·  d_h=head_dim=64  ·  V=vocab_size=50257`
+
+**Three moments a new dimension appears:**
+1. Step 1 `wte` — C=384 appears. Tensor goes 2D → 3D.
+2. Step 5 `.view()` — n_head and head_dim appear. Tensor goes 3D → 4D.
+3. Step 7 `q@k.T` — second T appears. The 64 dims cancel → T×T scores.
+
+**After Step 14, this `(B, T, 384)` flows back to the Block's residual addition:**
+```python
+x = x + self.attn(self.ln_1(x))   # [NC]  x: (B,T,384) throughout
+x = x + self.mlp(self.ln_2(x))    # [NC]  shape never changes
+# → repeat × 6 blocks
+# → ln_f → lm_head → (B, T, 50257) logits
+```
+
+---
+
 ## The Entrance, Exit, and Thinking Style — `wte`, `lm_head`, `n_head`
 
 This is where raw token IDs first meet the neural network's architecture. Three terms define the boundary between tokenisation and computation.
@@ -354,6 +393,55 @@ self.register_buffer(                          # [PT] saves tensor with model
 ```
 
 Full treatment — Q, K, V, the score computation, why it works — in Phase 3.
+
+---
+
+---
+
+## ★ Quick Reference — Complete Dimension Trace
+
+*The single most useful table in this journal. Every shape change in the entire model, in order. Pin this mentally — once you know it, all of nanochat's code becomes readable.*
+
+### From get_batch() to attention scores (inside CausalSelfAttention)
+
+| Step | Operation | Shape | Notes |
+|------|-----------|-------|-------|
+| 0 | `get_batch()` `[NC]` | `(B, T)` | `(12, 1024)` int64 — raw token IDs |
+| 1 | `wte(idx)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — **C=384 appears. 2D→3D** |
+| 2 | `+ wpe(pos)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — position added. shape unchanged |
+| 3 | `c_attn(x)` `[PT]` | `(B, T, 3C)` | `(12, 1024, 1152)` — Q+K+V fused. **C triples** |
+| 4 | `.split(384, dim=2)` `[PT]` | `q,k,v: (B,T,C)` | `(12, 1024, 384)` × 3 — separated |
+| 5 | `.view(B,T,6,64)` `[PT]` | `(B, T, n_h, d_h)` | `(12,1024,6,64)` — **4D! heads labelled** |
+| 6 | `.transpose(1,2)` `[PT]` | `(B, n_h, T, d_h)` | `(12,6,1024,64)` — heads → dim 1 |
+| 7★ | `q @ k.T(-2,-1)` `[PT]` | `(B, n_h, T, T)` | `(12,6,1024,1024)` — **64 cancels → T×T scores** |
+| 8 | `× 1/√64` `[NC]` | `(B, n_h, T, T)` | scaled — prevents softmax collapse |
+| 9 | `masked_fill(-∞)` `[PT]` | `(B, n_h, T, T)` | future positions zeroed |
+| 10 | `softmax(dim=-1)` `[PT]` | `(B, n_h, T, T)` | weights sum to 1.0 per row |
+| 11 | `att @ v` `[PT]` | `(B, n_h, T, d_h)` | `(12,6,1024,64)` — weighted value sum |
+| 12 | `.transpose(1,2)` `[PT]` | `(B, T, n_h, d_h)` | `(12,1024,6,64)` — heads back to dim 2 |
+| 13 | `.view(B,T,384)` `[PT]` | `(B, T, C)` | `(12,1024,384)` — 6×64 concatenated |
+| 14 | `c_proj` `[PT]` | `(B, T, C)` | `(12,1024,384)` — **heads mixed. synthesis ✓** |
+
+### From CausalSelfAttention output to loss (the full model)
+
+| Step | Operation | Shape | Notes |
+|------|-----------|-------|-------|
+| 14 | `c_proj output` | `(B, T, C)` | back in Block.forward() |
+| 15 | `x = x + attn_out` `[NC]` | `(B, T, C)` | residual addition |
+| 16 | `mlp(ln_2(x))` `[NC]` | `(B, T, C)` | FFN: 384→1536→384 per token |
+| 17 | `x = x + mlp_out` `[NC]` | `(B, T, C)` | residual addition |
+| 18 | `× 6 blocks total` | `(B, T, C)` | **shape never changes through any block** |
+| 19 | `ln_f(x)` `[PT]` | `(B, T, C)` | normalise residual stream — only time |
+| 20★ | `lm_head(x)` `[PT]` | `(B, T, V)` | `(12,1024,50257)` — **V=50257 appears** |
+| 21 | `F.cross_entropy` `[PT]` | `scalar` | one number — minimise this |
+
+`B=12  ·  T=1024  ·  C=n_embd=384  ·  n_h=n_head=6  ·  d_h=head_dim=64  ·  V=vocab_size=50257`
+
+**Two shape changes in the entire model:**
+1. Step 1 — `wte`: `(B,T)` → `(B,T,384)` — C appears
+2. Step 20 — `lm_head`: `(B,T,384)` → `(B,T,50257)` — V appears
+
+**Everything between operates at exactly `(B, T, 384)` — always.**
 
 ---
 
@@ -1458,6 +1546,75 @@ In large-scale training (Meta, OpenAI), Adam states are split across multiple GP
 
 ---
 
+#### Mixed precision training — how fp32 master weights actually work
+
+When you use `torch.amp.autocast` with `dtype=torch.bfloat16`, a natural question is: where does the fp32 weight live and how does PyTorch keep it safe while computing in bf16?
+
+**The fp32 weight lives inside the `Linear` module as `self.weight`:**
+
+```python
+class Linear(nn.Linear):
+    def forward(self, x):
+        return F.linear(x, self.weight.to(dtype=x.dtype))
+        #                   ↑ fp32, persistent    ↑ bf16 temporary — discarded after matmul
+```
+
+When `.to(dtype=x.dtype)` is called, it **creates a new temporary tensor** — it does NOT modify `self.weight`. Once the matrix multiply is done, the temporary bf16 tensor is garbage-collected. The fp32 `self.weight` sits untouched, ready for the optimizer.
+
+**The full picture in GPU memory:**
+
+```
+GPU memory
+┌─────────────────────────────────────────────┐
+│  Linear module                              │
+│  ┌────────────────────────────────────┐     │
+│  │ self.weight  (fp32, persistent)    │ ◄───┼── optimizer holds reference
+│  │ self.bias    (fp32, persistent)    │     │   and updates in-place
+│  └────────────────────────────────────┘     │
+│                                             │
+│  During forward() with autocast:            │
+│  ┌────────────────────────────────────┐     │
+│  │ temp_bf16 = self.weight.to(bf16)   │     │  ← created, used, discarded
+│  │ result    = x @ temp_bf16.T        │     │    each forward pass
+│  └────────────────────────────────────┘     │
+└─────────────────────────────────────────────┘
+```
+
+The optimizer calls `optimizer.step()` and directly mutates `self.weight` (the fp32 tensor) in place:
+
+```python
+self.weight.data -= lr * self.weight.grad   # [PT] in-place update on fp32
+# The fp32 master copy is always updated — bf16 is only a compute format
+```
+
+**Memory cost of mixed precision:**
+
+```
+Pure fp32 training:
+  Weights: N × 4 bytes
+  Grads:   N × 4 bytes
+  m, v:    N × 8 bytes
+  Total:   N × 16 bytes
+
+Mixed precision (fp32 master weights + bf16 compute):
+  self.weight (fp32, persistent):        N × 4 bytes   ← always in VRAM
+  temp_bf16 during forward (brief):      N × 2 bytes   ← created and freed
+  Grads (usually bf16):                  N × 2 bytes
+  m, v (fp32 in AdamW):                  N × 8 bytes
+  Total:                            ≈    N × 14 bytes  ← modest saving
+
+Why bother? The bf16 compute is dramatically faster on modern GPUs (A100, H100)
+even with the same memory — tensor cores run bf16 at 2× the throughput of fp32.
+```
+
+**Why fp32 master weights are necessary:**
+
+If you trained entirely in bf16, the optimizer would accumulate gradient updates directly into bf16 weights. bf16 has only 7 bits of mantissa (vs 23 for fp32) — very small gradient updates (common in later training) get rounded to zero and the model stops learning. The fp32 master copy is precise enough to accumulate tiny updates correctly over millions of steps.
+
+> **TL;DR:** The fp32 weight is a regular `nn.Parameter` living inside the `Linear` module as `self.weight`. The optimizer holds a reference to it and updates it in-place. The bf16 version is a throwaway temporary created fresh each forward pass and discarded immediately after the matmul. Mixed precision = fp32 for storage and optimisation, bf16 for fast matrix compute.
+
+---
+
 #### Regularisation in nanochat — priority order
 
 | Technique | How | Always on? |
@@ -1507,6 +1664,25 @@ In large-scale training (Meta, OpenAI), Adam states are split across multiple GP
 *The heart of the transformer — how tokens talk to each other*
 
 This is the most important phase in the build. Everything before it was setup. The transformer's power comes entirely from what happens here: every token looks at every other token, scores how relevant each one is, and uses those scores to pull in information from across the sequence.
+
+**Keep this shape trace in view as you read — every section maps to one or more rows:**
+
+| Step | Operation | Shape | Section |
+|------|-----------|-------|---------|
+| 0 | `get_batch()` | `(B, T)` | Phase 1 |
+| 1 | `wte(idx)` | `(B, T, C)` | Phase 2 |
+| 2 | `+ wpe(pos)` | `(B, T, C)` | Phase 2 |
+| 3 | `c_attn(x)` | `(B, T, 3C)` | 3.1 — fused Q+K+V |
+| 4 | `.split(384, dim=2)` | `q,k,v: (B, T, C)` | 3.1 — separated |
+| 5 | `.view(B, T, 6, 64)` | `(B, T, n_h, d_h)` | 3.1 — **heads labelled, 3D→4D** |
+| 6 | `.transpose(1, 2)` | `(B, n_h, T, d_h)` | 3.1 — heads → dim 1 |
+| 7 | `q @ k.T(-2,-1)` | `(B, n_h, T, T)` | 3.2 — **raw scores, 64 dims cancel** |
+| 8 | `× 1/√64` | `(B, n_h, T, T)` | 3.2 — scaled |
+| 9 | `masked_fill(-∞)` | `(B, n_h, T, T)` | 3.2 — future masked |
+| 10 | `softmax(dim=-1)` | `(B, n_h, T, T)` | 3.2 — weights sum to 1.0 |
+| 11 | `att @ v` | `(B, n_h, T, d_h)` | 3.2 — weighted value sum |
+| 12 | `.transpose(1,2).view(B,T,384)` | `(B, T, C)` | 3.3 — concatenated |
+| 13 | `c_proj` | `(B, T, C)` | 3.3 — **heads mixed. synthesis ✓** |
 
 ---
 
@@ -1953,7 +2129,166 @@ def forward(self, x):                                            # [NC]
 
 ---
 
-## Residual Connections, MLP/FFN, and Gradient Flow
+### Attention granularity — per token, per layer, or per head?
+
+A common source of confusion: at what granularity does attention "happen"? The answer is all three — but they mean different things.
+
+**Per forward pass:** attention runs `n_layer` times (12 in nanochat) — once per transformer block. Total attention calls = 12, regardless of sequence length.
+
+**Per layer:** one attention call processes all T tokens simultaneously in a single fused GPU operation. Not a loop over tokens.
+
+**Per head:** within one layer, the single attention call is internally split into 6 parallel head computations. Each head sees all T tokens but only 64 of the 384 embedding dimensions.
+
+**Per token:** each of the T tokens produces its own Q, K, V vectors and receives its own output. All tokens processed in parallel.
+
+```
+ONE LAYER — attention called once, touches every token:
+
+          Head 0   Head 1   Head 2   Head 3   Head 4   Head 5
+Token 0:  [attn]   [attn]   [attn]   [attn]   [attn]   [attn]  →  output 0
+Token 1:  [attn]   [attn]   [attn]   [attn]   [attn]   [attn]  →  output 1
+...
+Token T-1:[attn]   [attn]   [attn]   [attn]   [attn]   [attn]  →  output T-1
+
+Each head sees ALL tokens independently.
+All tokens processed IN PARALLEL within one matmul.
+```
+
+| Level | Count | Description |
+|-------|-------|-------------|
+| Per forward pass | 12 | One attention call per block |
+| Per layer | 1 | Processes all T tokens at once |
+| Per layer, per head | 6 parallel | Each head independent |
+| Per layer, per token | T queries | Each token attends to all past tokens |
+
+**The key insight:** at every layer, every token "looks at" every past token. In a 12-layer model, each token is updated 12 times. After layer 0, it has incorporated information from all prior tokens. After layer 1, it incorporates information about *those updates*. After 12 layers, each token's representation is a deeply contextualised fusion of the entire sequence. This is why depth matters — each layer adds another round of cross-token information sharing.
+
+---
+
+### Token types vs token positions — two different things called "token"
+
+The word "token" is overloaded and causes real confusion. There are two completely separate concepts:
+
+**Token types (the vocabulary) — vocab_size = 32,768:**
+All the *possible distinct tokens* the model knows about — its dictionary. Each has a unique integer ID (0 to 32,767) and a corresponding row in `wte`.
+
+**Token positions (in a sequence) — up to sequence_len = 2,048:**
+The actual tokens *in your specific input*. "The cat sat" has 3 token positions, each holding one of the 32,768 possible token types.
+
+```python
+# "The cat sat" tokenised:
+token_ids = [142, 8417, 1923]   # 3 positions, each an ID from 0..32767
+
+# After embedding (wte lookup):
+x = wte(token_ids)              # shape: (3, 768)
+# The 32,768 vocabulary has "disappeared" — now just three 768-dim vectors
+```
+
+**Where vocab_size actually appears in the model:**
+
+| Component | Shape | Vocab involved? |
+|-----------|-------|----------------|
+| `wte` (input embed) | `(32768, 768)` | ✓ Yes — one row per token type |
+| `c_q, c_k, c_v, c_proj` | `(768, 768)` | ✗ No — works on 768-dim vectors |
+| MLP `c_fc, c_proj` | `(768, 3072)` etc. | ✗ No — works on 768-dim vectors |
+| `lm_head` (output) | `(768, 32768)` | ✓ Yes — one column per token type |
+| `value_embeds` | `(32768, 768)` | ✓ Yes — one row per token type |
+
+**Only embeddings and lm_head depend on vocab_size.** Everything in between — all 36 attention heads, all MLP layers — operates on 768-dim vectors and is completely vocabulary-agnostic. You could change `vocab_size` from 32,768 to 100,000 without touching a single attention or MLP weight.
+
+**Tracing the dimensions through the model:**
+
+```
+Input:  "The cat sat"
+         ↓ tokenise
+         [142, 8417, 1923]                     shape: (T=3,)
+         ↓ wte lookup (table: 32768 × 768)
+         [[v_142], [v_8417], [v_1923]]          shape: (T=3, 768)
+                                                ← vocab_size disappears here
+         ↓ 12 × (attention + MLP) — all 768×768
+         [[a_0], [a_1], [a_2]]                  shape: (T=3, 768)
+         ↓ lm_head (768 → 32768)
+         [[l_0], [l_1], [l_2]]                  shape: (T=3, 32768)
+                                                ← vocab_size reappears here
+         ↓ softmax + sample
+         next token ID (one of 32,768 possibilities)
+```
+
+**Why does `c_q` have shape (768, 768) and not (32768, 768)?**
+
+Because `c_q` never sees token IDs — it sees 768-dim embedding vectors. The embedding has already done the work of "what token is this." Once "cat" becomes `[0.21, -0.54, 0.88, ...]`, the attention mechanism treats it as a generic 768-dim vector. It does not ask "is this 'cat' or 'dog'?" — it just operates on whatever 768-dim vector it receives.
+
+This is one of the most elegant properties of the transformer: **internal computations are vocabulary-agnostic.** The vocabulary only enters through the embedding lookup at the boundary.
+
+---
+
+### Parameters vs activations — what scales with sequence length
+
+Another frequent confusion: model parameters do **not** scale with sequence length. Only activations do.
+
+**Parameters** are the weight matrices — the same numbers regardless of whether you process 10 tokens or 2,048 tokens. They get applied to every token but the count does not grow.
+
+**Activations** are the intermediate tensors computed during the forward pass — these scale with T.
+
+```python
+# Parameters (fixed, stored on GPU — do not grow with T):
+c_q.weight:   (768, 768)    ← same for T=3 or T=2048
+c_k.weight:   (768, 768)
+c_v.weight:   (768, 768)
+c_proj.weight:(768, 768)
+
+# Activations (computed per forward pass — scale with T):
+q:   (B, T, 768)            ← grows with sequence length
+k:   (B, T, 768)
+v:   (B, T, 768)
+att: (B, n_head, T, T)      ← grows quadratically with T
+```
+
+**Rough parameter count for nanochat:**
+
+```
+Per transformer block:
+  Attention (c_q, c_k, c_v, c_proj):  4 × 768² = 2.36M
+  MLP (c_fc + c_proj):                 2 × 768 × 3072 = 4.72M
+  LayerNorms:                          negligible
+  Total per block:                     ≈ 7.1M
+
+12 blocks:                             ≈ 85M params
+
+Embeddings:
+  wte:                       32768 × 768 = 25M
+  lm_head (weight-tied):     0M extra
+  value_embeds (6 layers):   6 × 32768 × 768 = 150M
+  wpe:                       2048 × 768 = 1.6M
+
+Total:                       ≈ 260M params
+```
+
+Note: value embeddings are actually the **biggest** parameter chunk — a quirk of nanochat's modern architecture.
+
+**KV cache at inference (not parameters — computed per step):**
+
+```
+KV cache shape: (n_layer, B, T, n_kv_head, head_dim)
+
+Calculation (B=1, T=2048, bf16):
+  K cache: 12 × 1 × 2048 × 6 × 128 × 2 bytes = 36 MB
+  V cache: 36 MB
+  Total:   72 MB
+
+Simpler formula:
+  2 (K+V) × n_layer × B × T × n_embd × bytes
+= 2 × 12 × 1 × 2048 × 768 × 2 = 75 MB ≈ 72 MB
+```
+
+| Setting | KV cache size |
+|---------|--------------|
+| B=1, T=2048 | ~72 MB |
+| B=1, T=8192 | ~288 MB |
+| B=8, T=2048 | ~576 MB |
+| B=8, T=8192 | ~2.3 GB |
+
+**This is why KV cache memory dominates long-context inference** — not parameter memory. A 260M-parameter model uses ~520 MB for weights (bf16) but the KV cache at long context can easily exceed that. GQA reduces KV cache proportionally: `n_kv_head=2` instead of 6 shrinks the cache by 3×.
 *Why x = x + f(x) is the most important design decision in the transformer*
 
 ---
@@ -2769,20 +3104,74 @@ score_2746 = 0.82*0.21 + (-0.41)*(-0.54) + 0.33*0.88 + ...  # = 8.7  "model" ←
 
 **Why not cosine similarity?** The dot product is simpler, faster, and differentiable. Magnitudes are handled implicitly by training. Also, lm_head shares weights with wte (weight tying) — the same matrix that encoded tokens at the entrance is reused to score them at the exit. The entrance and exit use identical geometry.
 
-**The output is logits, not probabilities:**
+---
+
+#### lm_head — what it actually does (and the naming confusion)
+
+`lm_head` has nothing to do with the attention heads. The name is short for **language model head** — it is the output layer of the entire model.
+
+By the time tokens reach `lm_head`, all the attention head business is long finished. The 6 attention heads ran, concatenated, went through `c_proj`, added back to the residual stream, went through MLP — all of that is done inside the 6 transformer blocks. What comes out is `x` of shape `(B, T, 384)` — one clean 384-dim vector per token, representing its full contextual meaning.
+
+`lm_head` then does one simple thing:
 
 ```python
-logits = self.lm_head(x)    # [PT] (B, T, 384) → (B, T, 50257)
-# 50257 raw scores per token position — one per vocabulary token
-# Can be any value — positive or negative
-# NOT probabilities — they do not sum to 1.0
-# Become probabilities only after softmax
-# Highest logit = most likely next token (before softmax)
-
-# During inference — convert to probabilities and sample:
-probs = F.softmax(logits[:, -1, :], dim=-1)   # [PT] last position only
-next_token = torch.multinomial(probs, 1)       # [PT] sample
+logits = self.lm_head(x)    # [PT]
+# nn.Linear(384, 50257, bias=False)
+# (B, T, 384) → (B, T, 50257)
+# For each token position: "which of the 50,257 vocabulary tokens
+#                           is most likely to come next?"
 ```
+
+It projects from 384 dimensions to 50,257 dimensions — one score per vocabulary token. That is it.
+
+**The naming confusion — two completely different things called "head":**
+
+| | Attention heads | lm_head |
+|--|----------------|---------|
+| **Count** | 6 per block × 6 blocks = 36 total | 1, at the very end |
+| **What it is** | Split of 384 dims into 6 × 64-dim subspaces | Single `nn.Linear(384, 50257)` |
+| **Purpose** | Let tokens attend to each other | Predict the next token |
+| **Output shape** | Recombined back to `(B, T, 384)` via c_proj | `(B, T, 50257)` logits |
+| **When it runs** | Inside each Block, during Phase 3 | After all 6 blocks, Phase 5 |
+
+**And softmax is not inside lm_head — it is a separate step:**
+
+```python
+# Training — F.cross_entropy applies softmax internally:
+logits = self.lm_head(x)                        # [PT] raw scores only
+loss   = F.cross_entropy(                        # [PT] softmax happens inside here
+    logits.view(-1, 50257),
+    targets.view(-1)
+)
+
+# Inference — softmax applied explicitly after lm_head:
+logits     = self.lm_head(x)                    # [PT] raw scores
+probs      = F.softmax(logits[:, -1, :], dim=-1) # [PT] softmax here
+next_token = torch.multinomial(probs, 1)         # [PT] sample
+```
+
+`lm_head` only produces raw scores (logits). Softmax is always a separate step — either fused inside `F.cross_entropy` during training, or applied explicitly during generation.
+
+**The complete flow — where lm_head sits:**
+
+```
+Transformer blocks (Phases 3 + 4)
+  6 attention heads × 6 blocks = 36 attention computations
+  All combined back to (B, T, 384) via c_proj and residuals
+        ↓
+  ln_f — normalise the residual stream
+        ↓
+  lm_head — nn.Linear(384, 50257)
+  "given this 384-dim summary of context, score each vocabulary token"
+        ↓
+  logits (B, T, 50257) — raw scores, no softmax yet
+        ↓
+  softmax (training: inside F.cross_entropy / inference: explicit)
+        ↓
+  probabilities over 50,257 tokens
+```
+
+`lm_head` is the exit door. The attention heads are the thinking that happened inside the blocks. They are unrelated beyond sharing the word "head."
 
 ---
 
@@ -3527,3 +3916,520 @@ enc.decode() → generated text
 ---
 
 *This journal covers the complete nanochat build — Phases 1 through 5. Return here to add clarifications, deeper dives, or notes from subsequent learning sessions.*
+
+---
+
+## Appendix A — Attention Variants and Modern Efficiency Techniques
+
+*Requires understanding standard attention (Phase 3) first. These are the techniques used in production models beyond nanochat.*
+
+---
+
+### A.1 — The problem with standard attention
+
+You know the attention score matrix is `(B, n_head, T, T)`. At T=2048, B=12, n_head=32 (GPT-3 scale):
+
+```
+Score matrix memory:
+  12 × 32 × 2048 × 2048 × 4 bytes = 6.4 GB
+  just for the scores — before softmax, before multiplying V
+```
+
+But the memory problem is worse than the size alone — it is about **where** the computation happens:
+
+```
+Standard attention — GPU memory round trips:
+
+  GPU compute cores → write T×T scores to HBM (slow off-chip RAM)
+  HBM               → read back to compute softmax
+  GPU compute cores → write softmax result to HBM
+  HBM               → read back to multiply by V
+  GPU compute cores → write output to HBM
+
+4–6 round trips between fast compute and slow memory per attention op.
+GPU compute cores sit idle waiting for memory transfers.
+This is called being memory-bandwidth bound.
+```
+
+---
+
+### A.2 — FlashAttention (Dao et al. 2022)
+
+FlashAttention does not change the **math** at all — the result is identical to standard attention. What it changes is the **order of operations**, keeping data in fast on-chip SRAM instead of writing to slow HBM.
+
+**The key insight — tiling:**
+
+```
+Standard attention:
+  Compute all T×T scores  →  write to HBM      ← slow
+  Read scores from HBM    →  softmax            ← slow
+  Write softmax to HBM                         ← slow
+  Read softmax from HBM   →  multiply V        ← slow
+  Write output to HBM                          ← slow
+
+FlashAttention:
+  Take tile of Q (64 rows), tile of K/V
+  Compute partial scores in SRAM               ← fast (on-chip)
+  Partial softmax correction in SRAM           ← fast (on-chip)
+  Accumulate partial output in SRAM            ← fast (on-chip)
+  Move to next tile, repeat
+  Write final output to HBM once               ← one slow write total
+```
+
+The softmax can be computed **incrementally** using the log-sum-exp identity — you do not need the full row in memory at once. The `(T, T)` matrix never exists in HBM.
+
+```
+Speed:   2–4× faster wall-clock time
+Memory:  O(T²) → O(T) — T×T matrix never materialised
+Result:  IDENTICAL to standard attention — not an approximation
+```
+
+| Version | Year | Key improvement |
+|---------|------|----------------|
+| FlashAttention-1 | 2022 | Tiling — eliminates T×T in HBM |
+| FlashAttention-2 | 2023 | Better parallelism, ~2× faster than v1 |
+| FlashAttention-3 | 2024 | H100-specific async memory, tensor core overlap |
+
+---
+
+### A.3 — Reducing the KV cache: MQA and GQA
+
+The **KV cache** stores past K and V tensors during generation. At each step you need K and V for all previous tokens. With standard MHA this is expensive:
+
+```
+KV cache size = 2 × n_layer × n_head × head_dim × T × bytes_per_value
+```
+
+For a 7B model generating 2048 tokens: several GB just for the cache.
+
+**Multi-Query Attention (MQA) — Shazeer 2019:**
+
+```
+Standard MHA:  Q heads = 32   K heads = 32   V heads = 32
+MQA:           Q heads = 32   K heads = 1    V heads = 1
+
+All 32 query heads share ONE key and ONE value head.
+KV cache: 32× smaller
+Quality:  slightly worse — information bottleneck in shared K/V
+Used in:  early PaLM, Falcon
+```
+
+**Grouped Query Attention (GQA) — Ainslie et al. 2023:**
+
+```
+Standard MHA:  Q heads = 32   K heads = 32   V heads = 32
+GQA:           Q heads = 32   K heads = 8    V heads = 8
+
+Groups of 4 query heads share one K/V pair.
+KV cache: 4× smaller than MHA
+Quality:  close to MHA — sweet spot between MQA and MHA
+
+Used in: LLaMA-2/3, Mistral, Gemma — most modern open models
+         This is what n_kv_head in your config implements.
+```
+
+```python
+# In GPTConfig:
+n_head    = 32   # number of query heads
+n_kv_head = 8    # number of K/V heads
+                 # n_kv_head = n_head  → standard MHA
+                 # n_kv_head < n_head  → GQA
+```
+
+---
+
+### A.4 — Reducing T² cost: Sliding Window Attention
+
+```
+Standard:  every token attends to ALL T past tokens  →  O(T²)
+SWA:       every token attends to W nearest tokens   →  O(T × W)
+
+Token at position 1000, W=256:
+  Standard → attends to positions 0–999    (1000 tokens)
+  SWA      → attends to positions 744–999  (256 tokens only)
+```
+
+Information beyond the window still propagates indirectly through multiple layers. Layer 2 can attend to what Layer 1 already absorbed from distant tokens.
+
+```
+Used in:   Mistral-7B (W=4096), Longformer
+Trade-off: cannot directly attend to tokens > W positions ago
+           information propagates through layer depth instead
+```
+
+**Longformer** combines sliding window + global tokens:
+
+```
+Local:   every token attends to W=512 nearby tokens
+Global:  special tokens ([CLS], question tokens) attend to ALL tokens
+         and ALL tokens attend back to them
+
+Perfect for: document QA where one token needs full document context
+```
+
+---
+
+### A.5 — Better positional encoding: RoPE
+
+**RoPE (Rotary Position Embedding) — Su et al. 2021**
+
+Standard nanochat uses learned absolute positional embeddings (`wpe`) — a 384-dim vector added per position. This works but does not generalise to sequences longer than the training length.
+
+RoPE instead **rotates** Q and K vectors by position-dependent angles before the dot product:
+
+```
+Standard PE:  score(i,j) = (Q_i + pos_i) · (K_j + pos_j)
+RoPE:         score(i,j) = (R_θ,i × Q_i) · (R_θ,j × K_j)
+
+Key property: the dot product depends only on (i - j) — relative position
+              not absolute positions i and j separately
+```
+
+```
+Benefits:
+  Generalises better to longer sequences than learned PE
+  Can be extended (RoPE scaling) to 4×–8× training length at inference
+  Relative position is more natural for language
+  "3 tokens ago" matters more than "position 512 in absolute terms"
+
+Used in: LLaMA, Mistral, GPT-NeoX, Gemma — most modern open models
+         Replaced learned wpe in most production models
+```
+
+---
+
+### A.6 — Sparse attention
+
+**Sparse Transformer — Child et al. 2019:**
+
+```
+Standard: every token → every past token  (dense, T² connections)
+Sparse:   each token attends to a fixed subset only
+
+Two patterns combined across heads:
+  Local heads:   attend to the W nearest tokens     (nearby context)
+  Strided heads: attend to every k-th token         (long-range context)
+
+Cost: O(T × √T) instead of O(T²)
+Trade-off: misses some connections — information must hop through multiple layers
+```
+
+---
+
+### A.7 — Linear attention
+
+**Linear Attention — Katharopoulos et al. 2020:**
+
+```
+Standard: softmax(QKᵀ / √d) × V   →  O(T²)  must form T×T matrix
+Linear:   φ(Q) × (φ(K)ᵀ × V)     →  O(T)   reorder the multiplications
+
+The trick — change the order:
+  Standard:  (Q × Kᵀ) × V     →  T×T intermediate (grows with sequence)
+  Linear:    Q × (Kᵀ × V)     →  d×d intermediate (does not grow with T)
+
+φ() is a kernel function approximating softmax
+
+Status: quality noticeably worse on language — softmax's peaked
+        "winner takes most" distribution cannot be replicated by linear kernels
+        Active research — has not replaced softmax in practice yet
+```
+
+---
+
+### A.8 — What is actually used in 2025
+
+```
+Training large models (standard recipe):
+  FlashAttention-2/3              ← universal — everyone uses this
+  GQA (n_kv_head < n_head)        ← standard in all new models
+  RoPE positional encoding         ← replaced learned PE in most models
+
+Efficient inference / long context:
+  Sliding Window Attention         ← Mistral, some variants
+  KV cache quantisation            ← compress K/V to int8/int4
+  Speculative decoding             ← small draft model + large verify model
+
+Very long sequences (100k+ tokens):
+  Ring Attention                   ← distributes T dimension across GPUs
+  FlashAttention with seq parallel ← same idea
+
+Research / not yet mainstream:
+  Linear Attention                 ← quality gap not yet closed
+  State Space Models (Mamba)       ← O(T) alternative to attention entirely
+  Hybrid (Attention + SSM)         ← Jamba, Zamba — active area
+```
+
+---
+
+### A.9 — Summary table
+
+| Variant | What changes | Memory cost | Quality vs MHA | Used in |
+|---------|-------------|-------------|----------------|---------|
+| Standard MHA | baseline | O(T²) | baseline | GPT-2, nanochat |
+| FlashAttention | order of ops only | O(T) | **identical** | all modern training |
+| MQA | 1 K/V head shared | KV ÷ n_head | slightly worse | PaLM, Falcon |
+| GQA | K/V heads grouped | KV ÷ group_size | close to MHA | LLaMA-2/3, Mistral |
+| Sliding Window | attend to W tokens only | O(T×W) | worse for long-range | Mistral-7B |
+| Sparse Attention | fixed sparse pattern | O(T√T) | slightly worse | Sparse Transformer |
+| Linear Attention | kernel replaces softmax | O(T) | noticeably worse | research |
+| RoPE | positional encoding only | same as MHA | same or better | LLaMA, most modern |
+
+---
+
+### A.10 — Hyperparameter decisions and scaling laws
+
+*How are model dimensions (n_layer, n_embd, vocab_size, sequence_len) chosen?*
+
+**The honest answer:** a mix of empirical research, compute budgets, and scaling laws — not derived from first principles.
+
+**vocab_size:** A tokeniser decision. Too small (1k) wastes context window on fragments. Too large (500k) makes the embedding table enormous and rare tokens never get enough training signal. The sweet spot is 32k–100k. Powers of 2 (32,768) are convenient for GPU memory alignment.
+
+**sequence_len:** Set by GPU memory and task requirements. The `(T, T)` attention matrix grows quadratically — doubling T quadruples attention memory. 2,048 became a standard because it fits several paragraphs, trained well on consumer hardware, and GPT-3 used it. Modern models push to 8k–128k using FlashAttention + RoPE scaling.
+
+**n_layer vs n_embd — the depth/width tradeoff:**
+
+```
+Doubling n_layer (12 → 24):    parameters ≈ ×2
+Doubling n_embd (768 → 1536):  parameters ≈ ×4
+```
+
+Width scales parameters faster. For a fixed budget, larger models are proportionally wider. Observed ratios across real models:
+
+| Model | Params | n_layer | n_embd | n_embd / n_layer |
+|-------|--------|---------|--------|-----------------|
+| GPT-2 small | 117M | 12 | 768 | 64 |
+| GPT-2 medium | 345M | 24 | 1024 | 43 |
+| GPT-3 | 175B | 96 | 12288 | 128 |
+| LLaMA-7B | 7B | 32 | 4096 | 128 |
+| LLaMA-70B | 70B | 80 | 8192 | 102 |
+
+No single fixed ratio — but as models grow, width scales faster than depth.
+
+**head_dim converges to 128.** Most modern models use head_dim = 64 or 128 regardless of model size. FlashAttention is optimised for these sizes. Larger models get more heads by increasing n_embd, not by making individual heads larger.
+
+**The Chinchilla finding — the most important ratio:**
+
+Chinchilla (Hoffmann et al. 2022) showed that most models before it were **undertrained** — too many parameters relative to training tokens.
+
+```
+Kaplan (2020): given compute C, maximise parameters
+               GPT-3: 175B params, 300B tokens
+
+Chinchilla (2022): optimal is to scale both equally
+               optimal tokens ≈ 20 × num_parameters
+
+Examples:
+  7B  model → needs ~140B tokens minimum
+  13B model → needs ~260B tokens minimum
+  70B model → needs ~1.4T tokens minimum
+
+GPT-3 (175B params, 300B tokens) should have seen ~3.5T tokens.
+LLaMA proved this by training a 7B model on 1T tokens and beating GPT-3.
+```
+
+**For nanochat (85M params):** Chinchilla says you need ~1.7B training tokens. The Shakespeare corpus is ~1M tokens — the model has far more capacity than the data can fill, so it memorises rather than generalises. To use an 85M model well you need OpenWebText (9B tokens) or similar.
+
+---
+
+### A.11 — Value Embeddings (ResFormer / Value Residual Learning)
+
+*A very recent technique (2024) — not in most tutorials. nanochat includes it as part of its "modern minimalism" approach.*
+
+#### What are value embeddings?
+
+Standard attention computes V (values) from the **previous layer's hidden states**:
+
+```python
+V = c_v(x)    # x is the activations from the previous layer
+              # V changes every layer, every context, every token
+```
+
+**Value embeddings** add a *second* source for V — a **learned lookup table indexed directly by token ID**, just like `wte`:
+
+```python
+# Standard attention:
+V_standard = c_v(x)                    # [NC] dynamic — from previous layer
+
+# With value embeddings:
+V_static   = value_embed[token_ids]    # [NC] static — direct lookup by token ID
+V_combined = V_standard + V_static     # [NC] mix both sources
+```
+
+For each token ID, there is a learned "what content does this token contribute to attention" vector that is **the same regardless of layer or context** — a static, token-specific value sitting alongside the dynamic one.
+
+#### The key intuition — shortcut path for token identity
+
+In a deep transformer, by layer 6 or 8, the activations have been transformed so much that the original "this is the token 'cat'" signal has diffused into abstract representations. Value embeddings give attention a **direct path back to raw token identity** at any layer.
+
+It is similar in spirit to residual connections — a way to preserve original information that might otherwise get lost in deep stacks.
+
+```
+Without value embeddings:
+  Token "cat" → wte → Block 0 → Block 1 → ... → Block 11 → lm_head
+  By Block 11, "cat" identity has been heavily transformed
+
+With value embeddings:
+  Token "cat" → wte → Block 0 → Block 1 → ... → Block 11 → lm_head
+                          ↑          ↑                 ↑
+                       VE table   VE table          VE table
+  Each VE-enabled block can directly access "cat"'s static token vector
+```
+
+#### Where this comes from
+
+**Paper:** "Value Residual Learning For Alleviating Attention Concentration In Transformers" (Zhou et al., 2024) — also called **ResFormer**.
+
+Key findings:
+- In deep transformers, attention tends to **concentrate on too few tokens** in later layers — diversity loss
+- Adding direct value paths from input embeddings **improves attention diversity** and overall quality
+- You do not need it on every layer — alternating works almost as well at half the parameter cost
+
+Popularised by the **modded-nanoGPT speedrun community** (Keller Jordan et al.) who found it as one of several tricks to set training speed records on the FineWeb benchmark. nanochat inherits it from there.
+
+#### Why selective layers — not every layer
+
+```python
+def has_ve(layer_idx, n_layer):                           # [NC]
+    return layer_idx % 2 == (n_layer - 1) % 2
+    # True for alternating layers, always True for the last layer
+```
+
+**Cost of one value embedding table:** `vocab_size × n_embd` parameters.
+
+```
+nanochat config: vocab_size=50257, n_embd=768
+One VE table: 50257 × 768 ≈ 38M params
+
+12 layers, every layer:   12 × 38M = 456M extra params  ← too expensive
+12 layers, alternating:    6 × 38M = 228M extra params  ← acceptable
+Performance difference:              nearly identical
+```
+
+**Why the modular formula guarantees the last layer always gets one:**
+
+```python
+# If n_layer = 12 (even):
+#   target parity = (12-1) % 2 = 1  → odd-indexed layers get VE
+#   last layer index = 11 (odd)      → last layer gets VE ✓
+
+# If n_layer = 13 (odd):
+#   target parity = (13-1) % 2 = 0  → even-indexed layers get VE
+#   last layer index = 12 (even)     → last layer gets VE ✓
+
+# A simpler layer_idx % 2 == 1 would break for odd n_layer.
+# The formula generalises correctly for any n_layer.
+```
+
+The last layer is guaranteed a value embedding because it feeds directly into `lm_head` — having a clean token-identity signal there is most valuable right before the output projection.
+
+#### The value embedding gate — controlling the mix
+
+Once you have both `V_dynamic` and `V_static`, nanochat doesn't simply add them with equal weight. A small learned gate controls the blend:
+
+```python
+gate = 3 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))
+# gate shape: (B, T, n_kv_head) = (B, T, 6)
+
+v = v + gate.unsqueeze(-1) * ve
+# gate.unsqueeze(-1):   (B, T, 6, 1)
+# ve:                   (B, T, 6, 128)    ← value embedding, per head
+# result:               (B, T, 6, 128)    ← V_final = V_dynamic + gate × V_static
+```
+
+Breaking down the gate expression right to left:
+
+**Step 1 — `x[..., :self.ve_gate_channels]` — slice the input:**
+
+```python
+x shape:                  (B, T, 768)
+x[..., :12]:              (B, T, 12)    # only the first 12 channels — 1.5% of embedding
+```
+
+Why such a tiny slice? With only 12 input channels, the gate has very limited expressive power — it behaves like a **learned per-layer constant** with mild per-token variation. It is not doing fine-grained content-aware reasoning. It is a near-free learnable knob the model can tune during training.
+
+**Step 2 — `self.ve_gate(...)` — small linear projection:**
+
+```python
+self.ve_gate = Linear(ve_gate_channels, n_kv_head, bias=False)
+# Linear(12, 6) — only 72 parameters per layer!
+# Maps 12-channel slice → 6 gate values (one per head)
+```
+
+Each attention head gets its own independent gate value. The entire gate module costs **72 parameters per layer** — essentially free.
+
+**Step 3 — `torch.sigmoid(...)` — squash to (0, 1):**
+
+```
+sigmoid(-∞) → 0.0   (ignore the static value embedding)
+sigmoid(0)  → 0.5   (mix half and half)
+sigmoid(+∞) → 1.0   (fully use the static value embedding)
+```
+
+**Step 4 — `3 ×` — rescale to (0, 3):**
+
+The unusual part. Instead of leaving the gate at `(0, 1)`, the output is scaled to `(0, 3)`. This lets the gate **amplify**, not just attenuate:
+
+```
+(0, 1) gate:  can only shrink V_static's contribution
+(0, 3) gate:  can shrink, match, or amplify — up to 3× the raw magnitude
+default (sigmoid ≈ 0.5): gate ≈ 1.5 — already mildly boosted
+
+The model can express: "this static signal is more important than a
+single residual step" — something impossible with a (0,1) gate.
+```
+
+The factor of 3 is empirical from the modded-nanoGPT speedrun community — worked best in their ablations.
+
+**The complete gate annotated:**
+
+```python
+gate = 3 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))
+#       ↑        ↑                ↑                ↑
+#       │        │                │                └─ 12-channel slice (cheap)
+#       │        │                └─ Linear(12→6): 72 params, one gate per head
+#       │        └─ sigmoid: smooth bound to (0, 1)
+#       └─ ×3: rescale to (0, 3) — allow amplification, not just attenuation
+```
+
+**Why per-head gating (not per-token or per-channel)?**
+
+Each attention head specialises in a different type of relationship (syntax, semantics, long-range dependencies). Gating at the head level lets specialised heads adopt specialised strategies — a syntax head might strongly use V_static (raw token identity matters for POS tags) while a coreference head might not (context matters more). Within a head, the gate is the same across all 128 channels — expressive enough without exploding parameters.
+
+**Why this design works — five reasons:**
+
+| Property | How |
+|----------|-----|
+| Per-head decisions | Different heads can independently decide how much to trust raw token identity |
+| Almost free | 72 params per layer + matmul on only 12 channels |
+| Smooth and differentiable | sigmoid plays well with backpropagation |
+| Bounded but expressive | (0, 3) covers off / neutral / amplify |
+| Mostly a learned knob | With 12 input channels, behaves like per-layer constant with light token variation |
+
+> **TL;DR:** The gate is a per-head, 72-parameter learnable mixing weight in the range (0, 3) that controls how strongly each head blends static value embeddings into dynamic V. With only 12 input channels it is mostly a learned per-layer constant — not fine-grained per-token reasoning. The 3× scaling trick (from modded-nanoGPT) lets the gate amplify rather than just attenuate. Think of it as: "each head learns a roughly-constant mixing weight, with a small freedom to adapt it per token."
+
+```
+Token IDs ──► wte ──► Block 0  (no VE)
+                      Block 1  (VE) ◄── VE Table 1  [vocab × n_embd]
+                      Block 2  (no VE)
+                      Block 3  (VE) ◄── VE Table 3  [vocab × n_embd]
+                      Block 4  (no VE)
+                      Block 5  (VE) ◄── VE Table 5  [vocab × n_embd]
+                      ...
+                      Block 11 (VE) ◄── VE Table 11 [vocab × n_embd]
+                      ──► ln_f ──► lm_head ──► logits
+```
+
+Each VE-enabled layer has its **own** lookup table — not shared. At layer 3, attention can look up what token "cat" contributes at that depth, which is different from what it contributes at layer 11.
+
+#### Summary
+
+| Aspect | Detail |
+|--------|--------|
+| **What it is** | Learned lookup table: token ID → static V vector, added to dynamic V |
+| **Why** | Gives attention a direct path back to raw token identity at deeper layers |
+| **Effect** | Improves attention diversity, reduces concentration in later layers |
+| **Cost** | ~vocab_size × n_embd params per layer — hence alternating layers only |
+| **Origin** | Zhou et al. 2024 (ResFormer), adopted by modded-nanoGPT speedrun community |
+| **In nanochat** | Alternating layers via `has_ve(layer_idx, n_layer)`, last layer guaranteed |
+| **Note** | Not in GPT-2/LLaMA tutorials — nanochat is intentionally on the modern edge |
