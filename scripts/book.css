@@ -1,0 +1,468 @@
+/* ==========================================================================
+   nanochat Reference Book — Print-Optimised Stylesheet
+   ========================================================================== */
+
+/* ---------- Page setup (A4) ---------- */
+@page {
+  size: A4;
+  margin: 25mm 20mm 25mm 20mm;
+
+  @bottom-center {
+    content: counter(page);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 9pt;
+    color: #666;
+  }
+}
+
+@page :first {
+  @bottom-center { content: none; }
+  @top-right    { content: none; }
+}
+
+/* Chapter name in running header — set via h2 string-set */
+@page chapter {
+  @top-right {
+    content: string(chapter-title);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 8pt;
+    color: #888;
+    font-style: italic;
+  }
+}
+
+/* ---------- Base typography ---------- */
+:root {
+  --blue:    #2563eb;
+  --blue-light:  #dbeafe;
+  --green:   #16a34a;
+  --green-light: #dcfce7;
+  --orange:  #ea580c;
+  --orange-light:#fff7ed;
+  --purple:  #7c3aed;
+  --purple-light:#f3e8ff;
+  --gray-50: #f9fafb;
+  --gray-100:#f3f4f6;
+  --gray-200:#e5e7eb;
+  --gray-600:#4b5563;
+  --gray-800:#1f2937;
+  --gray-900:#111827;
+}
+
+html {
+  font-size: 11pt;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--gray-900);
+  line-height: 1.6;
+  max-width: 100%;
+}
+
+/* ---------- Title page (h1) ---------- */
+h1 {
+  page: title;
+  font-size: 2.8em;
+  font-weight: 800;
+  color: var(--blue);
+  text-align: center;
+  margin-top: 30%;
+  margin-bottom: 0.3em;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  page-break-after: always;
+}
+
+/* Subtitle line right after h1 — the italic paragraph */
+h1 + p {
+  text-align: center;
+  font-size: 1.2em;
+  color: var(--gray-600);
+  margin-bottom: 4em;
+}
+
+@page title {
+  @top-right    { content: none; }
+  @bottom-center { content: none; }
+}
+
+/* ---------- Table of contents ---------- */
+nav#TOC {
+  page-break-after: always;
+}
+
+nav#TOC ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+nav#TOC > ul > li {
+  margin-bottom: 0.4em;
+  font-weight: 600;
+}
+
+nav#TOC > ul > li > ul > li {
+  font-weight: 400;
+  padding-left: 1.5em;
+  margin-bottom: 0.15em;
+  color: var(--gray-600);
+}
+
+nav#TOC a {
+  color: var(--gray-800);
+  text-decoration: none;
+}
+
+nav#TOC a:hover {
+  color: var(--blue);
+}
+
+/* ---------- Headings ---------- */
+
+/* ## — Chapter heading: coloured underline, page break before */
+h2 {
+  font-size: 1.8em;
+  font-weight: 700;
+  color: var(--gray-900);
+  border-bottom: 3px solid var(--blue);
+  padding-bottom: 0.25em;
+  margin-top: 1.5em;
+  margin-bottom: 0.8em;
+  page-break-before: always;
+  string-set: chapter-title content();
+  page: chapter;
+}
+
+/* First h2 should not double-break after TOC */
+nav#TOC + h2,
+h1 + p + h2 {
+  page-break-before: auto;
+}
+
+/* ### — Section heading: coloured left border */
+h3 {
+  font-size: 1.3em;
+  font-weight: 600;
+  color: var(--gray-800);
+  border-left: 4px solid var(--purple);
+  padding-left: 0.6em;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+}
+
+h4 {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--gray-600);
+  margin-top: 1.2em;
+  margin-bottom: 0.4em;
+}
+
+/* ---------- Paragraphs & inline ---------- */
+p {
+  margin-bottom: 0.8em;
+  orphans: 3;
+  widows: 3;
+}
+
+strong {
+  font-weight: 700;
+}
+
+em {
+  font-style: italic;
+}
+
+a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+/* ---------- Blockquotes (info boxes) ---------- */
+blockquote {
+  background: var(--blue-light);
+  border-left: 4px solid var(--blue);
+  margin: 1.2em 0;
+  padding: 0.8em 1em;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.95em;
+}
+
+blockquote p {
+  margin-bottom: 0.4em;
+}
+
+blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- Code ---------- */
+
+/* Inline code */
+code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: var(--gray-100);
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+}
+
+/* Code blocks */
+pre {
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 1em 1.2em;
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.5;
+  margin: 1em 0;
+  page-break-inside: avoid;
+  border-left: 4px solid var(--gray-200);
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+/* PyTorch code blocks — blue left border */
+pre.pytorch,
+pre[class*="pytorch"],
+div.sourceCode[data-lang="pytorch"] pre {
+  border-left: 4px solid var(--blue);
+}
+
+/* nanochat code blocks — green left border */
+pre.nanochat,
+pre[class*="nanochat"],
+div.sourceCode[data-lang="nanochat"] pre {
+  border-left: 4px solid var(--green);
+}
+
+/* Python code — default styling kept via highlight */
+div.sourceCode {
+  margin: 1em 0;
+  page-break-inside: avoid;
+}
+
+div.sourceCode pre {
+  margin: 0;
+}
+
+/* Pandoc syntax highlighting — subtle colours for print */
+code span.kw { color: #7c3aed; font-weight: 600; }  /* keyword — purple */
+code span.dt { color: #2563eb; }                      /* data type — blue */
+code span.fu { color: #0891b2; }                      /* function — teal */
+code span.st { color: #16a34a; }                      /* string — green */
+code span.co { color: #9ca3af; font-style: italic; }  /* comment — gray */
+code span.dv { color: #ea580c; }                      /* decimal value — orange */
+code span.bn { color: #ea580c; }                      /* base-n — orange */
+code span.fl { color: #ea580c; }                      /* float — orange */
+code span.op { color: var(--gray-800); }               /* operator */
+code span.bu { color: #0891b2; }                       /* builtin — teal */
+code span.cf { color: #7c3aed; font-weight: 600; }    /* control flow — purple */
+code span.im { color: #2563eb; }                       /* import — blue */
+code span.va { color: var(--gray-900); }               /* variable */
+
+/* ---------- Tables ---------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2em 0;
+  font-size: 0.92em;
+  page-break-inside: avoid;
+}
+
+thead {
+  background: var(--blue);
+  color: white;
+}
+
+th {
+  padding: 0.6em 0.8em;
+  text-align: left;
+  font-weight: 600;
+}
+
+td {
+  padding: 0.5em 0.8em;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+tbody tr:nth-child(even) {
+  background: var(--gray-50);
+}
+
+tbody tr:nth-child(odd) {
+  background: white;
+}
+
+/* ---------- Images / figures ---------- */
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.5em auto;
+  page-break-inside: avoid;
+}
+
+figure {
+  margin: 1.5em 0;
+  text-align: center;
+  page-break-inside: avoid;
+}
+
+figure img {
+  margin: 0 auto 0.6em auto;
+}
+
+figcaption,
+img + em,
+p > img + br + em {
+  display: block;
+  text-align: center;
+  font-size: 0.88em;
+  color: var(--gray-600);
+  font-style: italic;
+  margin-top: 0.4em;
+}
+
+/* ---------- Shape annotation badges: (B, T, C) style ---------- */
+
+/* Use with <span class="shape">B, T, C</span> or auto-styled via build script */
+.shape {
+  display: inline-block;
+  background: var(--purple-light);
+  color: var(--purple);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  font-weight: 600;
+  padding: 0.1em 0.55em;
+  border-radius: 999px;
+  border: 1px solid #c4b5fd;
+  white-space: nowrap;
+  vertical-align: baseline;
+  line-height: 1.4;
+}
+
+/* ---------- Warning / important callouts ---------- */
+/* Convention: a blockquote starting with ⚠ or **Warning** */
+blockquote:has(strong:first-child) {
+  background: var(--orange-light);
+  border-left-color: var(--orange);
+}
+
+/* ---------- Horizontal rules (section separators) ---------- */
+hr {
+  border: none;
+  border-top: 1px solid var(--gray-200);
+  margin: 2em 0;
+}
+
+/* ---------- Lists ---------- */
+ul, ol {
+  margin: 0.6em 0 0.8em 1.5em;
+  padding: 0;
+}
+
+li {
+  margin-bottom: 0.3em;
+}
+
+li > p {
+  margin-bottom: 0.3em;
+}
+
+/* Nested lists */
+li > ul, li > ol {
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
+}
+
+/* ---------- Definition lists ---------- */
+dl {
+  margin: 1em 0;
+}
+
+dt {
+  font-weight: 700;
+  color: var(--gray-800);
+  margin-top: 0.6em;
+}
+
+dd {
+  margin-left: 1.5em;
+  margin-bottom: 0.4em;
+}
+
+/* ---------- Math (if using KaTeX/MathJax) ---------- */
+.math, .katex, mjx-container {
+  color: var(--purple);
+}
+
+/* ---------- Footnotes ---------- */
+.footnotes {
+  font-size: 0.85em;
+  color: var(--gray-600);
+  border-top: 1px solid var(--gray-200);
+  margin-top: 2em;
+  padding-top: 1em;
+}
+
+/* ---------- Print-specific rules ---------- */
+@media print {
+  body {
+    font-size: 10.5pt;
+    color: black;
+  }
+
+  a {
+    color: var(--blue);
+    text-decoration: none;
+  }
+
+  /* Don't waste toner on large background fills */
+  blockquote {
+    background: none !important;
+    border-left-width: 3px;
+  }
+
+  thead {
+    background: var(--gray-100) !important;
+    color: black;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Keep coloured borders — they use little ink */
+  pre {
+    background: #fafafa !important;
+  }
+
+  .shape {
+    background: none !important;
+    border: 1px solid var(--purple);
+  }
+
+  /* Avoid orphans / widows */
+  p {
+    orphans: 3;
+    widows: 3;
+  }
+
+  h2, h3, h4 {
+    page-break-after: avoid;
+  }
+
+  pre, table, figure, blockquote {
+    page-break-inside: avoid;
+  }
+
+  /* Do not print link URLs inline */
+  a[href]:after {
+    content: none !important;
+  }
+}

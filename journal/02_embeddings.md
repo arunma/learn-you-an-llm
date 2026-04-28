@@ -37,6 +37,10 @@ def forward(self, idx, targets=None):   # [NC] idx arrives: (B, T) int64
 
 ### 2.2 — `nn.Embedding`: the lookup table (`wte`)
 
+![nn.Embedding Lookup: token ID → embedding vector](diagrams/embedding_lookup.svg)
+
+*The embedding table is just a matrix. Each token ID indexes a single row — no computation, just lookup. The 768 numbers per row are the learned parameters.*
+
 `nn.Embedding` is a matrix with a special forward pass: instead of a matrix multiply, it does a **row lookup**. You give it an integer, it returns that row. That is the entire operation.
 
 ```

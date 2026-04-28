@@ -13,9 +13,9 @@
 
 ## Architecture Overview — The Full nanochat Pipeline
 
-![Basic Transformer Architecture for Language Modeling](transformer_architecture.png)
+![nanochat Architecture Pipeline](diagrams/architecture_pipeline.svg)
 
-*The complete nanochat data flow. Every phase in this journal corresponds to a coloured region above.*
+*The complete nanochat data flow — from token IDs through 12 transformer blocks to logits. Every phase in this journal corresponds to a coloured region above.*
 
 ### Reading the diagram
 
@@ -482,6 +482,10 @@ Full treatment — Q, K, V, the score computation, why it works — in Phase 3.
 ## ★ Quick Reference — Complete Dimension Trace
 
 *The single most useful table in this journal. Every shape change in the entire model, in order. Pin this mentally — once you know it, all of nanochat's code becomes readable.*
+
+![Tensor Shape Flow Through nanochat Pipeline](diagrams/tensor_shape_flow.svg)
+
+*Each bar shows the total tensor size at that step. Gold borders mark the three moments a new dimension appears.*
 
 ### From get_batch() to attention scores (inside CausalSelfAttention)
 

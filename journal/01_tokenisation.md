@@ -54,6 +54,10 @@ BPE is greedy statistics, nothing more. Start with individual characters, repeat
 
 #### The algorithm step by step
 
+![BPE Tokenization: step-by-step merge process](diagrams/bpe_merge_steps.svg)
+
+*BPE in action: "lowest" goes from 6 characters to 2 tokens through repeated most-frequent-pair merges.*
+
 **Starting corpus** (with end-of-word marker `Ġ`):
 
 ```

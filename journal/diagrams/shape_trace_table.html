@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nanochat Tensor Shape Trace</title>
+<style>
+  :root {
+    --blue: #2196F3;
+    --green: #4CAF50;
+    --orange: #FF9800;
+    --purple: #9C27B0;
+    --teal: #009688;
+    --red: #F44336;
+    --gray: #607D8B;
+    --gold: #FFC107;
+
+    --blue-bg: #E3F2FD;
+    --green-bg: #E8F5E9;
+    --orange-bg: #FFF3E0;
+    --purple-bg: #F3E5F5;
+    --teal-bg: #E0F2F1;
+    --red-bg: #FFEBEE;
+    --gray-bg: #ECEFF1;
+
+    --group-embed: #E3F2FD;
+    --group-attn: #F3E5F5;
+    --group-mlp: #FFF3E0;
+    --group-block: #E0F2F1;
+    --group-output: #FFEBEE;
+
+    --row-highlight: #FFFDE7;
+    --border-change: #FFC107;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font);
+    background: #FAFAFA;
+    color: #212121;
+    padding: 2rem;
+    line-height: 1.5;
+  }
+
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #212121;
+    margin-bottom: 0.25rem;
+  }
+
+  .subtitle {
+    font-size: 0.875rem;
+    color: #757575;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 1.25rem;
+    padding: 0.75rem 1rem;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    color: #424242;
+  }
+
+  /* Pill / badge */
+  .pill {
+    display: inline-block;
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 0.82em;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .pill-B   { background: var(--blue-bg);   color: var(--blue); }
+  .pill-T   { background: var(--green-bg);  color: var(--green); }
+  .pill-C   { background: var(--orange-bg); color: var(--orange); }
+  .pill-nh  { background: var(--purple-bg); color: var(--purple); }
+  .pill-dh  { background: var(--teal-bg);   color: var(--teal); }
+  .pill-V   { background: var(--red-bg);    color: var(--red); }
+  .pill-4C  { background: var(--orange-bg); color: #E65100; }
+  .pill-sc  { background: var(--gray-bg);   color: var(--gray); }
+  .pill.legend-swatch { font-size: 0.75em; }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    overflow: hidden;
+  }
+
+  thead th {
+    background: #37474F;
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.7rem 0.9rem;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  thead th:first-child { border-radius: 8px 0 0 0; }
+  thead th:last-child  { border-radius: 0 8px 0 0; }
+
+  /* Group header rows */
+  tr.group-header td {
+    font-weight: 700;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+  }
+  tr.group-embed td  { background: var(--group-embed); color: #1565C0; }
+  tr.group-attn td   { background: var(--group-attn);  color: #7B1FA2; }
+  tr.group-mlp td    { background: var(--group-mlp);   color: #E65100; }
+  tr.group-block td  { background: var(--group-block);  color: #00695C; }
+  tr.group-output td { background: var(--group-output); color: #C62828; }
+
+  tbody td {
+    padding: 0.55rem 0.9rem;
+    font-size: 0.85rem;
+    border-bottom: 1px solid #EEEEEE;
+    vertical-align: middle;
+  }
+
+  /* Step number */
+  td.step {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #757575;
+    width: 3rem;
+    text-align: center;
+  }
+
+  /* Operation */
+  td.op {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: #37474F;
+  }
+
+  /* Shape column */
+  td.shape {
+    white-space: nowrap;
+  }
+  .shape-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+  .paren {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: #9E9E9E;
+    font-weight: 300;
+  }
+  .comma {
+    font-family: var(--mono);
+    color: #BDBDBD;
+    margin: 0 0.05em;
+  }
+
+  /* Dimensions column: concrete numbers */
+  td.dims {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: #9E9E9E;
+  }
+
+  /* Notes */
+  td.notes {
+    font-size: 0.82rem;
+    color: #616161;
+  }
+
+  /* Highlight rows where shape changes */
+  tr.shape-change {
+    background: var(--row-highlight);
+  }
+  tr.shape-change td:first-child {
+    box-shadow: inset 4px 0 0 var(--border-change);
+  }
+
+  /* Flow arrow between shapes */
+  .flow {
+    display: inline-block;
+    color: #BDBDBD;
+    font-size: 0.85rem;
+    margin: 0 0.3em;
+    vertical-align: middle;
+  }
+
+  /* Hover */
+  tbody tr:not(.group-header):hover {
+    background: #F5F5F5;
+  }
+  tbody tr.shape-change:hover {
+    background: #FFF9C4;
+  }
+
+  /* Responsive */
+  @media (max-width: 700px) {
+    body { padding: 0.75rem; }
+    thead th, tbody td { padding: 0.4rem 0.5rem; font-size: 0.78rem; }
+    .pill { font-size: 0.72em; padding: 0.1em 0.4em; }
+    td.dims { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Tensor Shape Trace</h1>
+<p class="subtitle">Every shape transformation in one forward pass through nanochat (12-block, 6-head, 768-dim GPT)</p>
+
+<div class="legend">
+  <div class="legend-item"><span class="pill pill-B legend-swatch">B</span> batch = 12</div>
+  <div class="legend-item"><span class="pill pill-T legend-swatch">T</span> sequence = 2048</div>
+  <div class="legend-item"><span class="pill pill-C legend-swatch">C</span> embed = 768</div>
+  <div class="legend-item"><span class="pill pill-nh legend-swatch">n_h</span> heads = 6</div>
+  <div class="legend-item"><span class="pill pill-dh legend-swatch">d_h</span> head dim = 128</div>
+  <div class="legend-item"><span class="pill pill-V legend-swatch">V</span> vocab = 32768</div>
+  <div class="legend-item"><span class="pill pill-4C legend-swatch">4C</span> MLP inner = 3072</div>
+  <div class="legend-item"><span class="pill pill-sc legend-swatch">scalar</span></div>
+  <div class="legend-item" style="margin-left:auto; opacity:0.7;">
+    <span style="display:inline-block;width:4px;height:14px;background:var(--gold);border-radius:2px;"></span>
+    = shape changes
+  </div>
+</div>
+
+<table>
+<thead>
+  <tr>
+    <th>Step</th>
+    <th>Operation</th>
+    <th>Shape</th>
+    <th>Dimensions</th>
+    <th>Notes</th>
+  </tr>
+</thead>
+<tbody>
+
+<!-- ── Embedding Group ────────────────────────────── -->
+<tr class="group-header group-embed"><td colspan="5">Embedding</td></tr>
+
+<tr>
+  <td class="step">0</td>
+  <td class="op">get_batch()</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048</td>
+  <td class="notes">int64 token IDs from data loader</td>
+</tr>
+
+<tr class="shape-change">
+  <td class="step">1</td>
+  <td class="op">wte(idx)</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">C=768 appears &mdash; 2D <span class="flow">&rarr;</span> 3D</td>
+</tr>
+
+<tr>
+  <td class="step">2</td>
+  <td class="op">norm(x)</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">RMSNorm &mdash; element-wise, shape preserved</td>
+</tr>
+
+<tr>
+  <td class="step">3</td>
+  <td class="op">smear</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Bigram injection shortcut</td>
+</tr>
+
+<!-- ── Attention Group ────────────────────────────── -->
+<tr class="group-header group-attn"><td colspan="5">Multi-Head Attention</td></tr>
+
+<tr>
+  <td class="step">4</td>
+  <td class="op">c_q / c_k / c_v</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Three separate linear projections</td>
+</tr>
+
+<tr class="shape-change">
+  <td class="step">5</td>
+  <td class="op">.view()</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-nh">n_h</span><span class="comma">,</span>
+      <span class="pill pill-dh">d_h</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 6 &times; 128</td>
+  <td class="notes">Heads split &mdash; 3D <span class="flow">&rarr;</span> 4D</td>
+</tr>
+
+<tr>
+  <td class="step">6</td>
+  <td class="op">RoPE</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-nh">n_h</span><span class="comma">,</span>
+      <span class="pill pill-dh">d_h</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 6 &times; 128</td>
+  <td class="notes">Rotary position encoding applied to Q, K</td>
+</tr>
+
+<tr>
+  <td class="step">7</td>
+  <td class="op">QK norm</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-nh">n_h</span><span class="comma">,</span>
+      <span class="pill pill-dh">d_h</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 6 &times; 128</td>
+  <td class="notes">Stability normalization on Q and K</td>
+</tr>
+
+<tr>
+  <td class="step">8</td>
+  <td class="op">Flash Attention</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-nh">n_h</span><span class="comma">,</span>
+      <span class="pill pill-dh">d_h</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 6 &times; 128</td>
+  <td class="notes">Fused QKV attention (causal mask built-in)</td>
+</tr>
+
+<tr class="shape-change">
+  <td class="step">9</td>
+  <td class="op">.view()</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Heads reassembled &mdash; 4D <span class="flow">&rarr;</span> 3D</td>
+</tr>
+
+<tr>
+  <td class="step">10</td>
+  <td class="op">c_proj</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Output projection</td>
+</tr>
+
+<tr>
+  <td class="step">11</td>
+  <td class="op">+ residual</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">With resid_lambda scaling</td>
+</tr>
+
+<!-- ── MLP Group ──────────────────────────────────── -->
+<tr class="group-header group-mlp"><td colspan="5">Feed-Forward (MLP)</td></tr>
+
+<tr class="shape-change">
+  <td class="step">12</td>
+  <td class="op">c_fc</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-4C">4C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 3072</td>
+  <td class="notes">Expand &mdash; inner dim = 4 &times; 768</td>
+</tr>
+
+<tr>
+  <td class="step">13</td>
+  <td class="op">relu&sup2;</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-4C">4C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 3072</td>
+  <td class="notes">Squared ReLU activation</td>
+</tr>
+
+<tr class="shape-change">
+  <td class="step">14</td>
+  <td class="op">c_proj (MLP)</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Compress back to C</td>
+</tr>
+
+<tr>
+  <td class="step">15</td>
+  <td class="op">+ residual</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Second residual connection in block</td>
+</tr>
+
+<!-- ── Block Repeat ───────────────────────────────── -->
+<tr class="group-header group-block"><td colspan="5">Block Repeat</td></tr>
+
+<tr>
+  <td class="step">16</td>
+  <td class="op">&times;12 blocks</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Steps 2&ndash;15 repeat for each of 12 layers</td>
+</tr>
+
+<!-- ── Output Group ───────────────────────────────── -->
+<tr class="group-header group-output"><td colspan="5">Output Head</td></tr>
+
+<tr>
+  <td class="step">17</td>
+  <td class="op">backout + norm</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-C">C</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 768</td>
+  <td class="notes">Subtract mid-layer output, final RMSNorm</td>
+</tr>
+
+<tr class="shape-change">
+  <td class="step">18</td>
+  <td class="op">lm_head</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-V">V</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 32768</td>
+  <td class="notes">V=32768 appears &mdash; project to vocabulary</td>
+</tr>
+
+<tr>
+  <td class="step">19</td>
+  <td class="op">softcap</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="paren">(</span>
+      <span class="pill pill-B">B</span><span class="comma">,</span>
+      <span class="pill pill-T">T</span><span class="comma">,</span>
+      <span class="pill pill-V">V</span>
+      <span class="paren">)</span>
+    </span>
+  </td>
+  <td class="dims">12 &times; 2048 &times; 32768</td>
+  <td class="notes">tanh logit clamping &plusmn;15</td>
+</tr>
+
+<tr class="shape-change">
+  <td class="step">20</td>
+  <td class="op">cross_entropy</td>
+  <td class="shape">
+    <span class="shape-wrap">
+      <span class="pill pill-sc">scalar</span>
+    </span>
+  </td>
+  <td class="dims">1</td>
+  <td class="notes">Entire tensor <span class="flow">&rarr;</span> one loss number</td>
+</tr>
+
+</tbody>
+</table>
+
+</div>
+</body>
+</html>
