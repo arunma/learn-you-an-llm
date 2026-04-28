@@ -724,6 +724,75 @@ In large-scale training (Meta, OpenAI), Adam states are split across multiple GP
 
 ---
 
+#### Mixed precision training — how fp32 master weights actually work
+
+When you use `torch.amp.autocast` with `dtype=torch.bfloat16`, a natural question is: where does the fp32 weight live and how does PyTorch keep it safe while computing in bf16?
+
+**The fp32 weight lives inside the `Linear` module as `self.weight`:**
+
+```python
+class Linear(nn.Linear):
+    def forward(self, x):
+        return F.linear(x, self.weight.to(dtype=x.dtype))
+        #                   ↑ fp32, persistent    ↑ bf16 temporary — discarded after matmul
+```
+
+When `.to(dtype=x.dtype)` is called, it **creates a new temporary tensor** — it does NOT modify `self.weight`. Once the matrix multiply is done, the temporary bf16 tensor is garbage-collected. The fp32 `self.weight` sits untouched, ready for the optimizer.
+
+**The full picture in GPU memory:**
+
+```
+GPU memory
+┌─────────────────────────────────────────────┐
+│  Linear module                              │
+│  ┌────────────────────────────────────┐     │
+│  │ self.weight  (fp32, persistent)    │ ◄───┼── optimizer holds reference
+│  │ self.bias    (fp32, persistent)    │     │   and updates in-place
+│  └────────────────────────────────────┘     │
+│                                             │
+│  During forward() with autocast:            │
+│  ┌────────────────────────────────────┐     │
+│  │ temp_bf16 = self.weight.to(bf16)   │     │  ← created, used, discarded
+│  │ result    = x @ temp_bf16.T        │     │    each forward pass
+│  └────────────────────────────────────┘     │
+└─────────────────────────────────────────────┘
+```
+
+The optimizer calls `optimizer.step()` and directly mutates `self.weight` (the fp32 tensor) in place:
+
+```python
+self.weight.data -= lr * self.weight.grad   # [PT] in-place update on fp32
+# The fp32 master copy is always updated — bf16 is only a compute format
+```
+
+**Memory cost of mixed precision:**
+
+```
+Pure fp32 training:
+  Weights: N × 4 bytes
+  Grads:   N × 4 bytes
+  m, v:    N × 8 bytes
+  Total:   N × 16 bytes
+
+Mixed precision (fp32 master weights + bf16 compute):
+  self.weight (fp32, persistent):        N × 4 bytes   ← always in VRAM
+  temp_bf16 during forward (brief):      N × 2 bytes   ← created and freed
+  Grads (usually bf16):                  N × 2 bytes
+  m, v (fp32 in AdamW):                  N × 8 bytes
+  Total:                            ≈    N × 14 bytes  ← modest saving
+
+Why bother? The bf16 compute is dramatically faster on modern GPUs (A100, H100)
+even with the same memory — tensor cores run bf16 at 2× the throughput of fp32.
+```
+
+**Why fp32 master weights are necessary:**
+
+If you trained entirely in bf16, the optimizer would accumulate gradient updates directly into bf16 weights. bf16 has only 7 bits of mantissa (vs 23 for fp32) — very small gradient updates (common in later training) get rounded to zero and the model stops learning. The fp32 master copy is precise enough to accumulate tiny updates correctly over millions of steps.
+
+> **TL;DR:** The fp32 weight is a regular `nn.Parameter` living inside the `Linear` module as `self.weight`. The optimizer holds a reference to it and updates it in-place. The bf16 version is a throwaway temporary created fresh each forward pass and discarded immediately after the matmul. Mixed precision = fp32 for storage and optimisation, bf16 for fast matrix compute.
+
+---
+
 #### Regularisation in nanochat — priority order
 
 | Technique | How | Always on? |

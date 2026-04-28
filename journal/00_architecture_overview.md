@@ -63,6 +63,45 @@ These are the only two places `vocab_size` touches the model. Everything in betw
 - **Residual connections** (the curved arrows looping back in the green region) ensure gradients flow cleanly all the way back to the embedding layer during training.
 - **The transformer blocks are the expensive part** — `wte` and `lm_head` are single matrix lookups. The 6 stacked blocks with multi-head attention are where the compute lives.
 
+### ★ The Complete Dimension Trace — get_batch() to attention scores
+
+*This is the single most important reference table in this journal. It traces every shape change from raw token IDs all the way to the `(B, 6, T, T)` attention score matrix inside CausalSelfAttention. Memorise this and the entire model becomes readable.*
+
+| Step | Operation | Shape | Notes |
+|------|-----------|-------|-------|
+| 0 | `get_batch()` `[NC]` | `(B, T)` | `(12, 1024)` int64 — raw token IDs |
+| 1 | `wte(idx)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — **C=384 appears. 2D→3D** |
+| 2 | `+ wpe(pos)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — shape unchanged |
+| 3 | `c_attn(x)` `[PT]` | `(B, T, 3C)` | `(12, 1024, 1152)` — Q+K+V fused. C triples |
+| 4 | `.split(384, dim=2)` `[PT]` | `q,k,v: (B, T, C)` | `(12, 1024, 384)` × 3 tensors |
+| 5 | `.view(B, T, 6, 64)` `[PT]` | `(B, T, n_h, d_h)` | `(12, 1024, 6, 64)` — **4D! heads labelled** |
+| 6 | `.transpose(1, 2)` `[PT]` | `(B, n_h, T, d_h)` | `(12, 6, 1024, 64)` — heads → dim 1 |
+| 7★ | `q @ k.T(-2,-1)` `[PT]` | `(B, n_h, T, T)` | `(12, 6, 1024, 1024)` — **75M scores!** |
+| 8 | `× 1/√64` `[NC]` | `(B, n_h, T, T)` | scaled — prevents softmax collapse |
+| 9 | `masked_fill(-∞)` `[PT]` | `(B, n_h, T, T)` | future positions zeroed |
+| 10 | `softmax(dim=-1)` `[PT]` | `(B, n_h, T, T)` | weights sum to 1.0 per row |
+| 11 | `att @ v` `[PT]` | `(B, n_h, T, d_h)` | `(12, 6, 1024, 64)` — weighted value sum |
+| 12 | `.transpose(1,2)` `[PT]` | `(B, T, n_h, d_h)` | `(12, 1024, 6, 64)` — heads back to dim 2 |
+| 13 | `.view(B, T, 384)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — 6×64 concatenated |
+| 14 | `c_proj` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — **heads mixed. synthesis complete ✓** |
+
+`B=12  ·  T=1024  ·  C=n_embd=384  ·  n_h=n_head=6  ·  d_h=head_dim=64  ·  V=vocab_size=50257`
+
+**Three moments a new dimension appears:**
+1. Step 1 `wte` — C=384 appears. Tensor goes 2D → 3D.
+2. Step 5 `.view()` — n_head and head_dim appear. Tensor goes 3D → 4D.
+3. Step 7 `q@k.T` — second T appears. The 64 dims cancel → T×T scores.
+
+**After Step 14, this `(B, T, 384)` flows back to the Block's residual addition:**
+```python
+x = x + self.attn(self.ln_1(x))   # [NC]  x: (B,T,384) throughout
+x = x + self.mlp(self.ln_2(x))    # [NC]  shape never changes
+# → repeat × 6 blocks
+# → ln_f → lm_head → (B, T, 50257) logits
+```
+
+---
+
 > **🔧 Actual nanochat** (`nanochat/gpt.py:28-39`)
 >
 > The real GPTConfig differs from the simplified version above:
@@ -437,6 +476,53 @@ self.register_buffer(                          # [PT] saves tensor with model
 ```
 
 Full treatment — Q, K, V, the score computation, why it works — in Phase 3.
+
+---
+
+## ★ Quick Reference — Complete Dimension Trace
+
+*The single most useful table in this journal. Every shape change in the entire model, in order. Pin this mentally — once you know it, all of nanochat's code becomes readable.*
+
+### From get_batch() to attention scores (inside CausalSelfAttention)
+
+| Step | Operation | Shape | Notes |
+|------|-----------|-------|-------|
+| 0 | `get_batch()` `[NC]` | `(B, T)` | `(12, 1024)` int64 — raw token IDs |
+| 1 | `wte(idx)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — **C=384 appears. 2D→3D** |
+| 2 | `+ wpe(pos)` `[PT]` | `(B, T, C)` | `(12, 1024, 384)` — position added. shape unchanged |
+| 3 | `c_attn(x)` `[PT]` | `(B, T, 3C)` | `(12, 1024, 1152)` — Q+K+V fused. **C triples** |
+| 4 | `.split(384, dim=2)` `[PT]` | `q,k,v: (B,T,C)` | `(12, 1024, 384)` × 3 — separated |
+| 5 | `.view(B,T,6,64)` `[PT]` | `(B, T, n_h, d_h)` | `(12,1024,6,64)` — **4D! heads labelled** |
+| 6 | `.transpose(1,2)` `[PT]` | `(B, n_h, T, d_h)` | `(12,6,1024,64)` — heads → dim 1 |
+| 7★ | `q @ k.T(-2,-1)` `[PT]` | `(B, n_h, T, T)` | `(12,6,1024,1024)` — **64 cancels → T×T scores** |
+| 8 | `× 1/√64` `[NC]` | `(B, n_h, T, T)` | scaled — prevents softmax collapse |
+| 9 | `masked_fill(-∞)` `[PT]` | `(B, n_h, T, T)` | future positions zeroed |
+| 10 | `softmax(dim=-1)` `[PT]` | `(B, n_h, T, T)` | weights sum to 1.0 per row |
+| 11 | `att @ v` `[PT]` | `(B, n_h, T, d_h)` | `(12,6,1024,64)` — weighted value sum |
+| 12 | `.transpose(1,2)` `[PT]` | `(B, T, n_h, d_h)` | `(12,1024,6,64)` — heads back to dim 2 |
+| 13 | `.view(B,T,384)` `[PT]` | `(B, T, C)` | `(12,1024,384)` — 6×64 concatenated |
+| 14 | `c_proj` `[PT]` | `(B, T, C)` | `(12,1024,384)` — **heads mixed. synthesis ✓** |
+
+### From CausalSelfAttention output to loss (the full model)
+
+| Step | Operation | Shape | Notes |
+|------|-----------|-------|-------|
+| 14 | `c_proj output` | `(B, T, C)` | back in Block.forward() |
+| 15 | `x = x + attn_out` `[NC]` | `(B, T, C)` | residual addition |
+| 16 | `mlp(ln_2(x))` `[NC]` | `(B, T, C)` | FFN: 384→1536→384 per token |
+| 17 | `x = x + mlp_out` `[NC]` | `(B, T, C)` | residual addition |
+| 18 | `× 6 blocks total` | `(B, T, C)` | **shape never changes through any block** |
+| 19 | `ln_f(x)` `[PT]` | `(B, T, C)` | normalise residual stream — only time |
+| 20★ | `lm_head(x)` `[PT]` | `(B, T, V)` | `(12,1024,50257)` — **V=50257 appears** |
+| 21 | `F.cross_entropy` `[PT]` | `scalar` | one number — minimise this |
+
+`B=12  ·  T=1024  ·  C=n_embd=384  ·  n_h=n_head=6  ·  d_h=head_dim=64  ·  V=vocab_size=50257`
+
+**Two shape changes in the entire model:**
+1. Step 1 — `wte`: `(B,T)` → `(B,T,384)` — C appears
+2. Step 20 — `lm_head`: `(B,T,384)` → `(B,T,50257)` — V appears
+
+**Everything between operates at exactly `(B, T, 384)` — always.**
 
 ---
 

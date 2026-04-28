@@ -287,3 +287,166 @@ def forward(self, x):                                            # [NC]
 > - Pattern like `"SSSL"` repeats across layers: 3 short-window layers, then 1 full-context layer
 > - Short window = `ceil(seq_len / 4 / 128) * 128` — aligned to Flash Attention tile size
 > - Final layer always sees full sequence regardless of pattern
+
+---
+
+### Attention granularity — per token, per layer, or per head?
+
+A common source of confusion: at what granularity does attention "happen"? The answer is all three — but they mean different things.
+
+**Per forward pass:** attention runs `n_layer` times (12 in nanochat) — once per transformer block. Total attention calls = 12, regardless of sequence length.
+
+**Per layer:** one attention call processes all T tokens simultaneously in a single fused GPU operation. Not a loop over tokens.
+
+**Per head:** within one layer, the single attention call is internally split into 6 parallel head computations. Each head sees all T tokens but only 64 of the 384 embedding dimensions.
+
+**Per token:** each of the T tokens produces its own Q, K, V vectors and receives its own output. All tokens processed in parallel.
+
+```
+ONE LAYER — attention called once, touches every token:
+
+          Head 0   Head 1   Head 2   Head 3   Head 4   Head 5
+Token 0:  [attn]   [attn]   [attn]   [attn]   [attn]   [attn]  →  output 0
+Token 1:  [attn]   [attn]   [attn]   [attn]   [attn]   [attn]  →  output 1
+...
+Token T-1:[attn]   [attn]   [attn]   [attn]   [attn]   [attn]  →  output T-1
+
+Each head sees ALL tokens independently.
+All tokens processed IN PARALLEL within one matmul.
+```
+
+| Level | Count | Description |
+|-------|-------|-------------|
+| Per forward pass | 12 | One attention call per block |
+| Per layer | 1 | Processes all T tokens at once |
+| Per layer, per head | 6 parallel | Each head independent |
+| Per layer, per token | T queries | Each token attends to all past tokens |
+
+**The key insight:** at every layer, every token "looks at" every past token. In a 12-layer model, each token is updated 12 times. After layer 0, it has incorporated information from all prior tokens. After layer 1, it incorporates information about *those updates*. After 12 layers, each token's representation is a deeply contextualised fusion of the entire sequence. This is why depth matters — each layer adds another round of cross-token information sharing.
+
+---
+
+### Token types vs token positions — two different things called "token"
+
+The word "token" is overloaded and causes real confusion. There are two completely separate concepts:
+
+**Token types (the vocabulary) — vocab_size = 32,768:**
+All the *possible distinct tokens* the model knows about — its dictionary. Each has a unique integer ID (0 to 32,767) and a corresponding row in `wte`.
+
+**Token positions (in a sequence) — up to sequence_len = 2,048:**
+The actual tokens *in your specific input*. "The cat sat" has 3 token positions, each holding one of the 32,768 possible token types.
+
+```python
+# "The cat sat" tokenised:
+token_ids = [142, 8417, 1923]   # 3 positions, each an ID from 0..32767
+
+# After embedding (wte lookup):
+x = wte(token_ids)              # shape: (3, 768)
+# The 32,768 vocabulary has "disappeared" — now just three 768-dim vectors
+```
+
+**Where vocab_size actually appears in the model:**
+
+| Component | Shape | Vocab involved? |
+|-----------|-------|----------------|
+| `wte` (input embed) | `(32768, 768)` | Yes — one row per token type |
+| `c_q, c_k, c_v, c_proj` | `(768, 768)` | No — works on 768-dim vectors |
+| MLP `c_fc, c_proj` | `(768, 3072)` etc. | No — works on 768-dim vectors |
+| `lm_head` (output) | `(768, 32768)` | Yes — one column per token type |
+| `value_embeds` | `(32768, 768)` | Yes — one row per token type |
+
+**Only embeddings and lm_head depend on vocab_size.** Everything in between — all 36 attention heads, all MLP layers — operates on 768-dim vectors and is completely vocabulary-agnostic. You could change `vocab_size` from 32,768 to 100,000 without touching a single attention or MLP weight.
+
+**Tracing the dimensions through the model:**
+
+```
+Input:  "The cat sat"
+         ↓ tokenise
+         [142, 8417, 1923]                     shape: (T=3,)
+         ↓ wte lookup (table: 32768 × 768)
+         [[v_142], [v_8417], [v_1923]]          shape: (T=3, 768)
+                                                ← vocab_size disappears here
+         ↓ 12 × (attention + MLP) — all 768×768
+         [[a_0], [a_1], [a_2]]                  shape: (T=3, 768)
+         ↓ lm_head (768 → 32768)
+         [[l_0], [l_1], [l_2]]                  shape: (T=3, 32768)
+                                                ← vocab_size reappears here
+         ↓ softmax + sample
+         next token ID (one of 32,768 possibilities)
+```
+
+**Why does `c_q` have shape (768, 768) and not (32768, 768)?**
+
+Because `c_q` never sees token IDs — it sees 768-dim embedding vectors. The embedding has already done the work of "what token is this." Once "cat" becomes `[0.21, -0.54, 0.88, ...]`, the attention mechanism treats it as a generic 768-dim vector. It does not ask "is this 'cat' or 'dog'?" — it just operates on whatever 768-dim vector it receives.
+
+This is one of the most elegant properties of the transformer: **internal computations are vocabulary-agnostic.** The vocabulary only enters through the embedding lookup at the boundary.
+
+---
+
+### Parameters vs activations — what scales with sequence length
+
+Another frequent confusion: model parameters do **not** scale with sequence length. Only activations do.
+
+**Parameters** are the weight matrices — the same numbers regardless of whether you process 10 tokens or 2,048 tokens. They get applied to every token but the count does not grow.
+
+**Activations** are the intermediate tensors computed during the forward pass — these scale with T.
+
+```python
+# Parameters (fixed, stored on GPU — do not grow with T):
+c_q.weight:   (768, 768)    ← same for T=3 or T=2048
+c_k.weight:   (768, 768)
+c_v.weight:   (768, 768)
+c_proj.weight:(768, 768)
+
+# Activations (computed per forward pass — scale with T):
+q:   (B, T, 768)            ← grows with sequence length
+k:   (B, T, 768)
+v:   (B, T, 768)
+att: (B, n_head, T, T)      ← grows quadratically with T
+```
+
+**Rough parameter count for nanochat:**
+
+```
+Per transformer block:
+  Attention (c_q, c_k, c_v, c_proj):  4 × 768² = 2.36M
+  MLP (c_fc + c_proj):                 2 × 768 × 3072 = 4.72M
+  LayerNorms:                          negligible
+  Total per block:                     ≈ 7.1M
+
+12 blocks:                             ≈ 85M params
+
+Embeddings:
+  wte:                       32768 × 768 = 25M
+  lm_head (weight-tied):     0M extra
+  value_embeds (6 layers):   6 × 32768 × 768 = 150M
+  wpe:                       2048 × 768 = 1.6M
+
+Total:                       ≈ 260M params
+```
+
+Note: value embeddings are actually the **biggest** parameter chunk — a quirk of nanochat's modern architecture.
+
+**KV cache at inference (not parameters — computed per step):**
+
+```
+KV cache shape: (n_layer, B, T, n_kv_head, head_dim)
+
+Calculation (B=1, T=2048, bf16):
+  K cache: 12 × 1 × 2048 × 6 × 128 × 2 bytes = 36 MB
+  V cache: 36 MB
+  Total:   72 MB
+
+Simpler formula:
+  2 (K+V) × n_layer × B × T × n_embd × bytes
+= 2 × 12 × 1 × 2048 × 768 × 2 = 75 MB ≈ 72 MB
+```
+
+| Setting | KV cache size |
+|---------|--------------|
+| B=1, T=2048 | ~72 MB |
+| B=1, T=8192 | ~288 MB |
+| B=8, T=2048 | ~576 MB |
+| B=8, T=8192 | ~2.3 GB |
+
+**This is why KV cache memory dominates long-context inference** — not parameter memory. A 260M-parameter model uses ~520 MB for weights (bf16) but the KV cache at long context can easily exceed that. GQA reduces KV cache proportionally: `n_kv_head=2` instead of 6 shrinks the cache by 3×.
