@@ -70,6 +70,8 @@ pos 3  →  [  1      1      1      1  ]  sees everything past
 
 **Why -∞ and not 0?** `exp(0) = 1` — a zero score still gets attention weight. `exp(-∞) = 0` — no contribution whatsoever. Only -∞ guarantees the masked positions are completely ignored.
 
+> **The mask is the *only* thing that distinguishes causal (decoder) from bidirectional (encoder) attention.** Same Q/K/V projections, same `Q · Kᵀ` math, same softmax, same weighted sum of V. BERT-style encoders skip the `masked_fill` step and let every token see every other token. GPT-style decoders apply the lower-triangular mask and force each token to look only at itself and the past. Architecturally, "decoder vs encoder" reduces to a single line of code in `forward()`.
+
 ```python
 # Created once in __init__, reused every forward pass:
 self.register_buffer('bias',                        # [PT] saved with model, not a parameter
@@ -187,6 +189,39 @@ y = self.resid_dropout(self.c_proj(y))               # [PT]
 # c_proj: nn.Linear(384, 384) — mixes the 6 head outputs together
 # Output: (B, T, 384) — same shape as input to attention
 ```
+
+> **Block in = block out.** The attention output has the same shape `(B, T, C)` as `x`. So does the MLP that follows. So does the residual sum. So does the *whole* transformer block. That's why you can stack 12 of them with no reshape: block 12 takes block 11's output, which takes block 10's, all the way down. Every block is a `(B, T, C) → (B, T, C)` function, and the residual stream is just `C` numbers per token threading through the entire stack.
+
+---
+
+### What backprop actually updates — gradient shapes and "T-times effective"
+
+After `forward()` returns logits and a loss, `loss.backward()` walks the computation graph in reverse and writes a `.grad` field onto every leaf parameter. For attention, those leaves are `c_q.weight`, `c_k.weight`, `c_v.weight`, `c_proj.weight`. **Each gradient has the same shape as the weight it belongs to.**
+
+```
+c_q.weight        : (C, C)        ← the learned function
+c_q.weight.grad   : (C, C)        ← dL/dc_q, written by autograd
+
+# Same for c_k, c_v, c_proj.
+# Adam, in turn, keeps two state tensors per parameter:
+#   exp_avg     : (C, C)   first moment  m
+#   exp_avg_sq  : (C, C)   second moment v
+# Then updates:  W ← W − lr · m̂ / (√v̂ + ε)
+```
+
+So per attention layer, the optimiser is bookkeeping `4 × 3 = 12` matrices of shape `(C, C)` (weight + grad + m + v, four times over). At `C = 768` that is ~28M numbers per layer just for the attention block's optimiser state — which is why mixed-precision Adam memory dominates training memory.
+
+**Why a single forward pass is `~T` times more effective than one autoregressive step.** The gradient at `c_q.weight` is **summed across every position in the sequence**. Each of the `T` next-token predictions in cross-entropy loss contributes its own term to `dL/dc_q`, and autograd accumulates them all into the single `(C, C)` gradient before the optimiser sees it.
+
+```
+loss = sum over t in 0..T-1 of:  CE( logits[:, t, :], targets[:, t] )
+
+dL/dc_q  =  sum over t in 0..T-1 of:  dL_t/dc_q
+            └────────────────┬────────────────┘
+                  one gradient, T positions of signal accumulated into it
+```
+
+Concretely: at `T = 1024`, one training step pushes `c_q` with gradient signal from 1024 next-token predictions simultaneously — vs. an autoregressive setup that would only get signal from a single next token per step. **This is the central reason transformers train so much faster than RNNs**: every position becomes a free training example inside the same forward pass, all sharing the same parameter gradients.
 
 ---
 

@@ -72,6 +72,52 @@ One GPU operation instead of three. Faster in practice — GPUs prefer large par
 
 ---
 
+#### Why is the weight matrix `(C, C)`? Reading the projection as a function
+
+A common stumbling block: the embedding is a `C`-dim vector, so why are `c_q.weight`, `c_k.weight`, `c_v.weight` each shaped `(C, C)`? What does the second `C` even *mean*? It is **not** "the relationship between embedding dims and embedding dims" — that framing leads nowhere. Here is the right way to read it.
+
+**A matrix is a function, not a "relationship".** Treat `c_q.weight` of shape `(C, C)` as a learned linear function `f: ℝ^C → ℝ^C`. Feed it any embedding `x` and it returns a new vector `Q`:
+
+```
+Q = x @ c_q.weight.T
+
+For each output dimension i in 0..C-1:
+  Q[i] = c_q.weight[i, 0] * x[0]
+       + c_q.weight[i, 1] * x[1]
+       + c_q.weight[i, 2] * x[2]
+       + ...
+       + c_q.weight[i, C-1] * x[C-1]
+```
+
+Each **row** of `c_q.weight` is a recipe for one output dim — a learned linear combination of all `C` input dims. There are `C` output dims, each with `C` coefficients, so `C × C` parameters total. Nothing in there encodes "dim *i* of x is related to dim *j* of x" — every entry is just a tunable knob: how strongly does input dim *j* contribute to output dim *i*.
+
+**The two `C`s are not the same `C`.**
+
+| C | Role |
+|---|------|
+| First `C` (rows) | **Output width** — how many numbers we want each Q vector to have |
+| Second `C` (cols) | **Input width** — how many numbers describe each embedding |
+
+There is no law that they must be equal. In pure multi-head attention each head projects to `head_dim = C / n_head` (128 in nanochat). The reason the per-projection shape lands back at `C` is bookkeeping — it concatenates all `n_head` heads side by side: `n_head × head_dim = C`. The second `C` is "all heads' Q-slots stacked together."
+
+**At init, Q, K, V are three random remixings of the same data.** All three matrices have the same shape and are applied to the same `x`. The only thing that distinguishes them is the *values* inside `c_q.weight`, `c_k.weight`, `c_v.weight` — and at step 0 those values are random. So at the start of training, Q, K, V are basically three random projections of the same embedding.
+
+**Training is what specialises them.** Through gradient descent driven by the loss:
+
+- `c_q` learns *"what kind of thing is this token looking for?"*
+- `c_k` learns *"what does this token offer to be matched against?"*
+- `c_v` learns *"what content should this token contribute when attended to?"*
+
+The architecture does not bake "Q is a query" into the matrix. It just provides three identical-shape slots, and the loss pressures them to specialise. This is also why **same projections, same math, different mask** is enough to flip between causal (decoder, GPT-style) and bidirectional (encoder, BERT-style) attention — the directionality lives in the mask in 3.2, not in these matrices.
+
+**The right mental gloss for `(C, C)`:** "a learned function from `C`-dim space to `C`-dim space, with `C²` tunable knobs, where each output dim mixes all `C` input dims with its own learned weights." Not a relationship — a recipe.
+
+> **Multi-head footnote.** The shapes above are the "1-head equivalent" view, which is the cleanest way to see the structure. In real multi-head attention, the projections still output `(B, T, C)`, but you reshape to `(B, T, n_head, head_dim)` *before* the `Q · Kᵀ` step so each head computes its own attention pattern in parallel — covered next.
+
+> **🎛️ Interactive widget.** Open [`diagrams/attention_training_shapes.html`](diagrams/attention_training_shapes.html) in a browser for a six-step click-through walkthrough at toy size `B=1, T=5, C=8`: input → Q/K/V projection → `Q · Kᵀ` scores → causal mask → attention output → backward pass + Adam update. Every step shows the exact tensor shape and the cell-level structure.
+
+---
+
 #### .view() and .transpose() — the head split explained
 
 After the fused projection and split, q, k, v are each `(B, T, 384)`. The 384 contains all 6 heads mixed together. Two operations separate them:

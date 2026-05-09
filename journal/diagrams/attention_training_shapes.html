@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attention training shapes — six-step walkthrough</title>
+<style>
+  :root {
+    --color-bg: #fafafa;
+    --color-surface: #ffffff;
+    --color-text: #1a1a1a;
+    --color-text-secondary: #555;
+    --color-border: #d8d8d8;
+    --color-border-tertiary: #c0c0c0;
+    --color-background-info: #e3f2fd;
+    --color-text-info: #0d47a1;
+    --color-border-info: #1976d2;
+
+    --c-purple: #7e57c2;
+    --c-purple-bg: #ede7f6;
+    --c-teal: #00897b;
+    --c-teal-bg: #e0f2f1;
+    --c-coral: #e35d6a;
+    --c-coral-bg: #ffe5e8;
+    --c-amber: #f9a825;
+    --c-amber-bg: #fff8e1;
+    --c-pink: #993556;
+    --c-pink-bg: #fde0ec;
+    --c-gray: #607d8b;
+    --c-gray-bg: #eceff1;
+    --c-green: #2e7d32;
+    --c-green-bg: #e8f5e9;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--color-bg);
+    color: var(--color-text);
+    margin: 0;
+    padding: 2rem;
+    line-height: 1.5;
+  }
+
+  .container {
+    max-width: 880px;
+    margin: 0 auto;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 1.5rem 2rem 2rem;
+  }
+
+  h1 {
+    margin: 0 0 0.4rem;
+    font-size: 1.4rem;
+  }
+
+  .lede {
+    color: var(--color-text-secondary);
+    margin: 0 0 1.25rem;
+    font-size: 0.95rem;
+  }
+
+  #step-buttons button {
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: white;
+    color: var(--color-text);
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+  }
+
+  #step-buttons button:hover {
+    background: var(--c-gray-bg);
+  }
+
+  .c-gray   rect { fill: var(--c-gray-bg);   stroke: var(--c-gray);   }
+  .c-purple rect { fill: var(--c-purple-bg); stroke: var(--c-purple); }
+  .c-teal   rect { fill: var(--c-teal-bg);   stroke: var(--c-teal);   }
+  .c-coral  rect { fill: var(--c-coral-bg);  stroke: var(--c-coral);  }
+  .c-amber  rect { fill: var(--c-amber-bg);  stroke: var(--c-amber);  }
+  .c-pink   rect { fill: var(--c-pink-bg);   stroke: var(--c-pink);   }
+  .c-green  rect { fill: var(--c-green-bg);  stroke: var(--c-green);  }
+
+  text.th { font-size: 14px; font-weight: 600; fill: var(--color-text); }
+  text.ts { font-size: 12px; fill: var(--color-text-secondary); }
+  .arr    { stroke: var(--color-text-secondary); stroke-width: 1.4; fill: none; }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Attention training shapes — six-step walkthrough</h1>
+  <p class="lede">A toy-sized run with <code>B=1, T=5, C=8</code>. Click through the six steps to see how shapes flow from the input embedding to the weight update.</p>
+
+  <h2 class="sr-only">Step-by-step diagram showing tensor shapes during training: input, Q/K/V projection, causal masking, attention output, and weight updates.</h2>
+
+  <div style="display:flex;gap:8px;margin:0 0 1.5rem;flex-wrap:wrap" id="step-buttons">
+    <button onclick="setStep(0)">1. Input</button>
+    <button onclick="setStep(1)">2. Project Q, K, V</button>
+    <button onclick="setStep(2)">3. Q · Kᵀ scores</button>
+    <button onclick="setStep(3)">4. Causal mask</button>
+    <button onclick="setStep(4)">5. Attention out</button>
+    <button onclick="setStep(5)">6. Weight update</button>
+  </div>
+
+  <div id="diagram"></div>
+
+  <div id="caption" style="font-size:14px;color:var(--color-text-secondary);line-height:1.7;margin-top:1rem;min-height:80px"></div>
+</div>
+
+<script>
+let step = 0;
+
+const STEPS = [
+  {
+    caption: "Input x has shape (B=1, T=5, C=8). One sequence of 5 token embeddings, each 8-dimensional. We're showing one batch item with T=5 to keep it readable.",
+    svg: `
+      <svg width="100%" viewBox="0 0 680 280" role="img"><title>Input tensor</title><desc>Input x as a 5 by 8 grid representing 5 tokens each with 8-dimensional embeddings</desc>
+        <text class="th" x="340" y="36" text-anchor="middle">x — shape (B, T, C) = (1, 5, 8)</text>
+        ${gridSVG(220, 70, 5, 8, 'c-gray', null, ['t1','t2','t3','t4','t5'])}
+        <text class="ts" x="160" y="90" text-anchor="end">tokens (T)</text>
+        <text class="ts" x="340" y="240" text-anchor="middle">embedding dim (C)</text>
+      </svg>
+    `
+  },
+  {
+    caption: "Each Linear layer (c_q, c_k, c_v) is a (C, C) = (8, 8) weight matrix. Computing Q = x @ c_q.weight gives Q with shape (B, T, C) — same as x. Same for K and V. Three independent projections of the same input. At init the three matrices are random — only training pressures them to specialise into 'query', 'key', 'value'.",
+    svg: `
+      <svg width="100%" viewBox="0 0 680 460" role="img"><title>Q K V projection</title><desc>Input x multiplied by three weight matrices producing Q, K, V tensors</desc>
+        ${gridSVG(40, 40, 5, 8, 'c-gray', 'x (5×8)', null, 0.6)}
+        <text class="ts" x="200" y="90" text-anchor="middle">@</text>
+        ${gridSVG(220, 40, 8, 8, 'c-purple', 'c_q.weight (8×8)', null, 0.6)}
+        <text class="ts" x="430" y="90" text-anchor="middle">=</text>
+        ${gridSVG(450, 40, 5, 8, 'c-purple', 'Q (5×8)', null, 0.6)}
+
+        ${gridSVG(40, 180, 5, 8, 'c-gray', 'x (5×8)', null, 0.6)}
+        <text class="ts" x="200" y="230" text-anchor="middle">@</text>
+        ${gridSVG(220, 180, 8, 8, 'c-teal', 'c_k.weight (8×8)', null, 0.6)}
+        <text class="ts" x="430" y="230" text-anchor="middle">=</text>
+        ${gridSVG(450, 180, 5, 8, 'c-teal', 'K (5×8)', null, 0.6)}
+
+        ${gridSVG(40, 320, 5, 8, 'c-gray', 'x (5×8)', null, 0.6)}
+        <text class="ts" x="200" y="370" text-anchor="middle">@</text>
+        ${gridSVG(220, 320, 8, 8, 'c-coral', 'c_v.weight (8×8)', null, 0.6)}
+        <text class="ts" x="430" y="370" text-anchor="middle">=</text>
+        ${gridSVG(450, 320, 5, 8, 'c-coral', 'V (5×8)', null, 0.6)}
+      </svg>
+    `
+  },
+  {
+    caption: "Compute attention scores = Q @ Kᵀ / √d. Shape becomes (T, T) = (5, 5). Cell (i, j) holds the raw similarity between query i and key j. Every token can in principle look at every other token at this stage — no causality yet.",
+    svg: `
+      <svg width="100%" viewBox="0 0 680 320" role="img"><title>Q K transpose scores</title><desc>Q multiplied by K transpose producing 5 by 5 score matrix</desc>
+        ${gridSVG(40, 60, 5, 8, 'c-purple', 'Q (5×8)', null, 0.6)}
+        <text class="ts" x="200" y="100" text-anchor="middle">@</text>
+        ${gridSVG(220, 60, 8, 5, 'c-teal', 'Kᵀ (8×5)', null, 0.6)}
+        <text class="ts" x="430" y="100" text-anchor="middle">=</text>
+        ${gridSVG(450, 60, 5, 5, 'c-amber', 'scores (5×5)', null, 0.6)}
+        <text class="ts" x="340" y="280" text-anchor="middle">scores[i, j] = how much query i wants to look at key j</text>
+      </svg>
+    `
+  },
+  {
+    caption: "Add the causal mask: set all cells above the diagonal to -∞ before softmax. After softmax, those cells become 0 — meaning position i cannot attend to any future position j > i. Same projections, same math; the mask is the only thing that distinguishes decoder (causal) from encoder (bidirectional, e.g. BERT) attention.",
+    svg: `
+      <svg width="100%" viewBox="0 0 680 360" role="img"><title>Causal mask</title><desc>5 by 5 attention matrix with upper triangular cells masked out</desc>
+        <text class="th" x="340" y="36" text-anchor="middle">scores after causal mask + softmax</text>
+        ${maskedGridSVG(240, 70, 5, 'c-amber')}
+        <text class="ts" x="220" y="100" text-anchor="end">query →</text>
+        <text class="ts" x="340" y="290" text-anchor="middle">key →</text>
+        <text class="ts" x="340" y="320" text-anchor="middle">filled = attends, empty = blocked (future)</text>
+        <text class="ts" x="340" y="338" text-anchor="middle">row i sums to 1 after softmax</text>
+      </svg>
+    `
+  },
+  {
+    caption: "Multiply masked attention weights by V to get the output. Shape (T, T) @ (T, C) = (T, C) = (5, 8). Same shape as the input x — that's what lets transformer blocks stack: block 12 takes block 11's output with no reshape.",
+    svg: `
+      <svg width="100%" viewBox="0 0 680 320" role="img"><title>Attention output</title><desc>Attention weights multiplied by V producing output</desc>
+        ${maskedGridSVG(40, 60, 5, 'c-amber', 'attn (5×5)', 0.6)}
+        <text class="ts" x="200" y="100" text-anchor="middle">@</text>
+        ${gridSVG(220, 60, 5, 8, 'c-coral', 'V (5×8)', null, 0.6)}
+        <text class="ts" x="430" y="100" text-anchor="middle">=</text>
+        ${gridSVG(450, 60, 5, 8, 'c-pink', 'out (5×8)', null, 0.6)}
+        <text class="ts" x="340" y="280" text-anchor="middle">out[i] = weighted sum of V[0..i] using attn[i] as weights</text>
+      </svg>
+    `
+  },
+  {
+    caption: "Backward pass: loss flows back through the network. Gradients dL/dW are computed for c_q, c_k, c_v, c_proj — all (C, C) tensors matching the weight shape. Adam uses these gradients along with its m and v state (also (C, C) per matrix) to update each weight matrix. The gradient flows through every position simultaneously — a single training step on a length-T sequence is roughly T times more effective than one autoregressive step.",
+    svg: `
+      <svg width="100%" viewBox="0 0 680 420" role="img"><title>Weight update</title><desc>Gradients flowing back to update Q K V weights via Adam optimizer</desc>
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+
+        <g class="c-pink">
+          <rect x="260" y="30" width="160" height="56" rx="8" stroke-width="0.5"/>
+          <text class="th" x="340" y="52" text-anchor="middle" dominant-baseline="central">Loss L</text>
+          <text class="ts" x="340" y="70" text-anchor="middle" dominant-baseline="central">scalar</text>
+        </g>
+
+        <line x1="340" y1="86" x2="340" y2="120" class="arr" marker-end="url(#arrow)" stroke="#993556"/>
+        <text class="ts" x="360" y="106">backward</text>
+
+        <g class="c-purple">
+          <rect x="40" y="140" width="170" height="56" rx="8" stroke-width="0.5"/>
+          <text class="th" x="125" y="162" text-anchor="middle" dominant-baseline="central">dL/dc_q</text>
+          <text class="ts" x="125" y="180" text-anchor="middle" dominant-baseline="central">(C, C) = (8, 8)</text>
+        </g>
+        <g class="c-teal">
+          <rect x="255" y="140" width="170" height="56" rx="8" stroke-width="0.5"/>
+          <text class="th" x="340" y="162" text-anchor="middle" dominant-baseline="central">dL/dc_k</text>
+          <text class="ts" x="340" y="180" text-anchor="middle" dominant-baseline="central">(C, C) = (8, 8)</text>
+        </g>
+        <g class="c-coral">
+          <rect x="470" y="140" width="170" height="56" rx="8" stroke-width="0.5"/>
+          <text class="th" x="555" y="162" text-anchor="middle" dominant-baseline="central">dL/dc_v</text>
+          <text class="ts" x="555" y="180" text-anchor="middle" dominant-baseline="central">(C, C) = (8, 8)</text>
+        </g>
+
+        <line x1="125" y1="196" x2="125" y2="240" class="arr" marker-end="url(#arrow)"/>
+        <line x1="340" y1="196" x2="340" y2="240" class="arr" marker-end="url(#arrow)"/>
+        <line x1="555" y1="196" x2="555" y2="240" class="arr" marker-end="url(#arrow)"/>
+
+        <g class="c-gray">
+          <rect x="40" y="244" width="600" height="56" rx="8" stroke-width="0.5"/>
+          <text class="th" x="340" y="266" text-anchor="middle" dominant-baseline="central">Adam: m ← β₁m + (1-β₁)g,  v ← β₂v + (1-β₂)g²</text>
+          <text class="ts" x="340" y="284" text-anchor="middle" dominant-baseline="central">m, v stored per weight matrix, each (C, C) — persistent across steps</text>
+        </g>
+
+        <line x1="340" y1="300" x2="340" y2="334" class="arr" marker-end="url(#arrow)"/>
+
+        <g class="c-green">
+          <rect x="160" y="338" width="360" height="56" rx="8" stroke-width="0.5"/>
+          <text class="th" x="340" y="360" text-anchor="middle" dominant-baseline="central">c_q, c_k, c_v ← W − lr · m̂ / (√v̂ + ε)</text>
+          <text class="ts" x="340" y="378" text-anchor="middle" dominant-baseline="central">weights updated in place</text>
+        </g>
+      </svg>
+    `
+  }
+];
+
+function gridSVG(x, y, rows, cols, colorClass, label, rowLabels, opacity) {
+  const cell = 16;
+  const gap = 1;
+  const w = cols * (cell + gap) - gap;
+  const h = rows * (cell + gap) - gap;
+  let svg = `<g class="${colorClass}" opacity="${opacity || 1}">`;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      svg += `<rect x="${x + c * (cell + gap)}" y="${y + r * (cell + gap)}" width="${cell}" height="${cell}" rx="2" stroke-width="0.5"/>`;
+    }
+  }
+  svg += `</g>`;
+  if (label) svg += `<text class="ts" x="${x + w/2}" y="${y + h + 22}" text-anchor="middle">${label}</text>`;
+  if (rowLabels) {
+    for (let r = 0; r < rows; r++) {
+      svg += `<text class="ts" x="${x - 8}" y="${y + r * (cell + gap) + cell/2}" text-anchor="end" dominant-baseline="central">${rowLabels[r]}</text>`;
+    }
+  }
+  return svg;
+}
+
+function maskedGridSVG(x, y, n, colorClass, label, opacity) {
+  const cell = 26;
+  const gap = 2;
+  const w = n * (cell + gap) - gap;
+  const h = n * (cell + gap) - gap;
+  let svg = `<g class="${colorClass}" opacity="${opacity || 1}">`;
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (c <= r) {
+        svg += `<rect x="${x + c * (cell + gap)}" y="${y + r * (cell + gap)}" width="${cell}" height="${cell}" rx="3" stroke-width="0.5"/>`;
+      }
+    }
+  }
+  svg += `</g>`;
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (c > r) {
+        svg += `<rect x="${x + c * (cell + gap)}" y="${y + r * (cell + gap)}" width="${cell}" height="${cell}" rx="3" fill="none" stroke="var(--color-border-tertiary)" stroke-width="0.5" stroke-dasharray="2 2"/>`;
+      }
+    }
+  }
+  if (label) svg += `<text class="ts" x="${x + w/2}" y="${y + h + 22}" text-anchor="middle">${label}</text>`;
+  return svg;
+}
+
+function setStep(s) {
+  step = s;
+  document.getElementById('diagram').innerHTML = STEPS[s].svg;
+  document.getElementById('caption').textContent = STEPS[s].caption;
+  document.querySelectorAll('#step-buttons button').forEach((btn, i) => {
+    if (i === s) {
+      btn.style.background = 'var(--color-background-info)';
+      btn.style.color = 'var(--color-text-info)';
+      btn.style.borderColor = 'var(--color-border-info)';
+    } else {
+      btn.style.background = '';
+      btn.style.color = '';
+      btn.style.borderColor = '';
+    }
+  });
+}
+
+setStep(0);
+</script>
+</body>
+</html>
