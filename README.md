@@ -4,6 +4,8 @@ Learning materials for understanding how LLMs work, built around Karpathy's [nan
 
 Every concept is annotated: `[PT]` = PyTorch built-in, `[NC]` = nanochat custom. Tensor shape traces follow dimensions through each operation.
 
+> **Companion repo:** [`learn-you-an-hf-llm`](https://github.com/arunma/learn-you-an-hf-llm) — same architecture wrapped in Hugging Face Transformers (`PreTrainedModel`, `tokenizers`, Hub-loadable). Reference book for the HF track lives there in its own `journal/`.
+
 ## Tutorial
 
 - `llm_tutorial.html` — illustrated single-page tutorial (open in a browser)
